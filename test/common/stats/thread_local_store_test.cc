@@ -393,26 +393,29 @@ TEST_F(StatsThreadLocalStoreTest, BasicScope) {
 
   {
     StatNameManagedStorage storage("c3", symbol_table_);
-    Counter& counter = scope1->counterFromStatNameWithTags(StatName(storage.statName()), tags);
+    Counter& counter =
+        scope1->counterFromStatNameWithTags(StatName(storage.statName()), tags, Mode::Default);
     EXPECT_EQ(expectedTags, counter.tags());
-    EXPECT_EQ(&counter, &scope1->counterFromStatNameWithTags(StatName(storage.statName()), tags));
+    EXPECT_EQ(&counter, &scope1->counterFromStatNameWithTags(StatName(storage.statName()), tags,
+                                                             Mode::Default));
   }
   {
     StatNameManagedStorage storage("g3", symbol_table_);
     Gauge& gauge = scope1->gaugeFromStatNameWithTags(StatName(storage.statName()), tags,
-                                                     Gauge::ImportMode::Accumulate);
+                                                     Gauge::ImportMode::Accumulate, Mode::Default);
     EXPECT_EQ(expectedTags, gauge.tags());
-    EXPECT_EQ(&gauge, &scope1->gaugeFromStatNameWithTags(StatName(storage.statName()), tags,
-                                                         Gauge::ImportMode::Accumulate));
+    EXPECT_EQ(&gauge,
+              &scope1->gaugeFromStatNameWithTags(StatName(storage.statName()), tags,
+                                                 Gauge::ImportMode::Accumulate, Mode::Default));
   }
   {
     StatNameManagedStorage storage("h3", symbol_table_);
     Histogram& histogram = scope1->histogramFromStatNameWithTags(
-        StatName(storage.statName()), tags, Stats::Histogram::Unit::Unspecified);
+        StatName(storage.statName()), tags, Stats::Histogram::Unit::Unspecified, Mode::Default);
     EXPECT_EQ(expectedTags, histogram.tags());
-    EXPECT_EQ(&histogram,
-              &scope1->histogramFromStatNameWithTags(StatName(storage.statName()), tags,
-                                                     Stats::Histogram::Unit::Unspecified));
+    EXPECT_EQ(&histogram, &scope1->histogramFromStatNameWithTags(
+                              StatName(storage.statName()), tags,
+                              Stats::Histogram::Unit::Unspecified, Mode::Default));
   }
 
   store_->shutdownThreading();
@@ -731,19 +734,27 @@ TEST_F(LookupWithStatNameTest, NotFound) {
 
 class StatsMatcherTLSTest : public StatsThreadLocalStoreTest {
 public:
+  StatName makeStatName(absl::string_view name) { return pool_.add(name); }
+
   envoy::config::metrics::v3::StatsConfig stats_config_;
+  StatNamePool pool_{symbol_table_};
 };
 
-TEST_F(StatsMatcherTLSTest, TestNoOpStatImpls) {
-  InSequence s;
+// Testing No-op counters, gauges, histograms which match the prefix "noop".
+class StatsMatcherNoopTest : public StatsMatcherTLSTest {
+public:
+  StatsMatcherNoopTest() {
+    stats_config_.mutable_stats_matcher()->mutable_exclusion_list()->add_patterns()->set_prefix(
+        "noop");
+    store_->setStatsMatcher(std::make_unique<StatsMatcherImpl>(stats_config_));
+  }
 
-  stats_config_.mutable_stats_matcher()->mutable_exclusion_list()->add_patterns()->set_prefix(
-      "noop");
-  store_->setStatsMatcher(std::make_unique<StatsMatcherImpl>(stats_config_));
+  ~StatsMatcherNoopTest() override { store_->shutdownThreading(); }
 
-  // Testing No-op counters, gauges, histograms which match the prefix "noop".
+  InSequence sequence_;
+};
 
-  // Counter
+TEST_F(StatsMatcherNoopTest, Counters) {
   Counter& noop_counter = store_->counterFromString("noop_counter");
   EXPECT_EQ(noop_counter.name(), "");
   EXPECT_EQ(noop_counter.value(), 0);
@@ -758,8 +769,19 @@ TEST_F(StatsMatcherTLSTest, TestNoOpStatImpls) {
   EXPECT_FALSE(noop_counter.used());      // hardcoded to return false in NullMetricImpl.
   EXPECT_EQ(0, noop_counter.latch());     // hardcoded to 0.
   EXPECT_EQ(0, noop_counter.use_count()); // null counter is contained in ThreadLocalStoreImpl.
+  Counter& noop_counter_3 = store_->counterFromStatNameWithTags(makeStatName("noop_counter_3"),
+                                                                absl::nullopt, Mode::ForceEnable);
+  EXPECT_EQ(noop_counter_3.name(), "noop_counter_3");
+  EXPECT_EQ(noop_counter_3.value(), 0);
+  noop_counter_3.add(1);
+  EXPECT_EQ(noop_counter_3.value(), 1);
+  noop_counter_3.inc();
+  EXPECT_EQ(noop_counter_3.value(), 2);
+  noop_counter_3.reset();
+  EXPECT_EQ(noop_counter_3.value(), 0);
+}
 
-  // Gauge
+TEST_F(StatsMatcherNoopTest, Gauges) {
   Gauge& noop_gauge = store_->gaugeFromString("noop_gauge", Gauge::ImportMode::Accumulate);
   EXPECT_EQ(noop_gauge.name(), "");
   EXPECT_EQ(noop_gauge.value(), 0);
@@ -780,7 +802,27 @@ TEST_F(StatsMatcherTLSTest, TestNoOpStatImpls) {
   Gauge& noop_gauge_2 = store_->gaugeFromString("noop_gauge_2", Gauge::ImportMode::Accumulate);
   EXPECT_EQ(&noop_gauge, &noop_gauge_2);
 
-  // TextReadout
+  Gauge& noop_gauge_3 =
+      store_->gaugeFromStatNameWithTags(makeStatName("noop_gauge_3"), absl::nullopt,
+                                        Gauge::ImportMode::Accumulate, Mode::ForceEnable);
+  EXPECT_EQ(noop_gauge_3.name(), "noop_gauge_3");
+  EXPECT_EQ(noop_gauge_3.value(), 0);
+  noop_gauge_3.add(1);
+  EXPECT_EQ(noop_gauge_3.value(), 1);
+  noop_gauge_3.inc();
+  EXPECT_EQ(noop_gauge_3.value(), 2);
+  noop_gauge_3.dec();
+  EXPECT_EQ(noop_gauge_3.value(), 1);
+  noop_gauge_3.set(2);
+  EXPECT_EQ(noop_gauge_3.value(), 2);
+  noop_gauge_3.sub(2);
+  EXPECT_EQ(noop_gauge_3.value(), 0);
+  EXPECT_EQ(Gauge::ImportMode::Accumulate, noop_gauge_3.importMode());
+  EXPECT_TRUE(noop_gauge_3.used());
+  EXPECT_EQ(1, noop_gauge_3.use_count());
+}
+
+TEST_F(StatsMatcherNoopTest, TextReadouts) {
   TextReadout& noop_string = store_->textReadoutFromString("noop_string");
   EXPECT_EQ(noop_string.name(), "");
   EXPECT_EQ("", noop_string.value());
@@ -795,7 +837,21 @@ TEST_F(StatsMatcherTLSTest, TestNoOpStatImpls) {
   TextReadout& noop_string_2 = store_->textReadoutFromString("noop_string_2");
   EXPECT_EQ(&noop_string, &noop_string_2);
 
-  // Histogram
+  TextReadout& noop_string_3 = store_->textReadoutFromStatNameWithTags(
+      makeStatName("noop_string_3"), absl::nullopt, Mode::ForceEnable);
+  EXPECT_EQ(noop_string_3.name(), "noop_string_3");
+  EXPECT_EQ("", noop_string_3.value());
+  noop_string_3.set("hello");
+  EXPECT_EQ("hello", noop_string_3.value());
+  noop_string_3.set("hello");
+  EXPECT_EQ("hello", noop_string_3.value());
+  noop_string_3.set("goodbye");
+  EXPECT_EQ("goodbye", noop_string_3.value());
+  noop_string_3.set("hello");
+  EXPECT_EQ("hello", noop_string_3.value());
+}
+
+TEST_F(StatsMatcherNoopTest, Histograms) {
   Histogram& noop_histogram =
       store_->histogramFromString("noop_histogram", Stats::Histogram::Unit::Unspecified);
   EXPECT_EQ(noop_histogram.name(), "");
@@ -805,7 +861,12 @@ TEST_F(StatsMatcherTLSTest, TestNoOpStatImpls) {
       store_->histogramFromString("noop_histogram_2", Stats::Histogram::Unit::Unspecified);
   EXPECT_EQ(&noop_histogram, &noop_histogram_2);
 
-  store_->shutdownThreading();
+  Histogram& noop_histogram_3 = store_->histogramFromStatNameWithTags(
+      makeStatName("noop_histogram_3"), absl::nullopt, Stats::Histogram::Unit::Milliseconds,
+      Mode::ForceEnable);
+  EXPECT_EQ(noop_histogram_3.name(), "noop_histogram_3");
+  EXPECT_FALSE(noop_histogram_3.used());
+  EXPECT_EQ(Stats::Histogram::Unit::Milliseconds, noop_histogram_3.unit());
 }
 
 // We only test the exclusion list -- the inclusion list is the inverse, and both are tested in
@@ -931,7 +992,8 @@ TEST_F(StatsMatcherTLSTest, TestExclusionRegex) {
 class RememberStatsMatcherTest : public testing::TestWithParam<bool> {
 public:
   RememberStatsMatcherTest()
-      : heap_alloc_(symbol_table_), store_(heap_alloc_), scope_(store_.createScope("scope.")) {
+      : heap_alloc_(symbol_table_), store_(heap_alloc_), scope_(store_.createScope("scope.")),
+        pool_(symbol_table_) {
     if (GetParam()) {
       store_.initializeThreading(main_thread_dispatcher_, tls_);
     }
@@ -942,7 +1004,9 @@ public:
     tls_.shutdownThread();
   }
 
-  using LookupStatFn = std::function<std::string(const std::string&)>;
+  StatName makeStatName(absl::string_view name) { return pool_.add(name); }
+
+  using LookupStatFn = std::function<std::string(const std::string&, Mode)>;
 
   // Helper function to test the rejection cache. The goal here is to use
   // mocks to ensure that we don't call rejects() more than once on any of the
@@ -958,8 +1022,8 @@ public:
     EXPECT_CALL(*matcher, rejects("scope.ok")).WillOnce(Return(false));
 
     for (int j = 0; j < 5; ++j) {
-      EXPECT_EQ("", lookup_stat("reject"));
-      EXPECT_EQ("scope.ok", lookup_stat("ok"));
+      EXPECT_EQ("", lookup_stat("reject", Mode::Default));
+      EXPECT_EQ("scope.ok", lookup_stat("ok", Mode::Default));
     }
   }
 
@@ -971,11 +1035,24 @@ public:
     StatsMatcherPtr matcher_ptr(matcher);
     store_.setStatsMatcher(std::move(matcher_ptr));
 
-    ScopePtr scope = store_.createScope("scope.");
+    for (int j = 0; j < 5; ++j) {
+      // Note: zero calls to reject() are made, as reject-all should short-circuit.
+      EXPECT_EQ("", lookup_stat("reject", Mode::Default));
+    }
+  }
+
+  void testRejectsAllForceEnable(const LookupStatFn lookup_stat) {
+    InSequence s;
+
+    MockStatsMatcher* matcher = new MockStatsMatcher;
+    matcher->rejects_all_ = true;
+    StatsMatcherPtr matcher_ptr(matcher);
+    store_.setStatsMatcher(std::move(matcher_ptr));
 
     for (int j = 0; j < 5; ++j) {
       // Note: zero calls to reject() are made, as reject-all should short-circuit.
-      EXPECT_EQ("", lookup_stat("reject"));
+      EXPECT_EQ("scope.accept_despite_rejecgt_all",
+                lookup_stat("accept_despite_rejecgt_all", Mode::ForceEnable));
     }
   }
 
@@ -989,42 +1066,39 @@ public:
 
     for (int j = 0; j < 5; ++j) {
       // Note: zero calls to reject() are made, as accept-all should short-circuit.
-      EXPECT_EQ("scope.ok", lookup_stat("ok"));
+      EXPECT_EQ("scope.ok", lookup_stat("ok", Mode::Default));
     }
   }
 
   LookupStatFn lookupCounterFn() {
-    return [this](const std::string& stat_name) -> std::string {
-      return scope_->counterFromString(stat_name).name();
+    return [this](const std::string& stat_name, Mode mode) -> std::string {
+      return scope_->counterFromStatNameWithTags(makeStatName(stat_name), absl::nullopt, mode)
+          .name();
     };
   }
 
   LookupStatFn lookupGaugeFn() {
-    return [this](const std::string& stat_name) -> std::string {
-      return scope_->gaugeFromString(stat_name, Gauge::ImportMode::Accumulate).name();
+    return [this](const std::string& stat_name, Mode mode) -> std::string {
+      return scope_
+          ->gaugeFromStatNameWithTags(makeStatName(stat_name), absl::nullopt,
+                                      Gauge::ImportMode::Accumulate, mode)
+          .name();
     };
   }
-
-// TODO(jmarantz): restore BoolIndicator tests when https://github.com/envoyproxy/envoy/pull/6280
-// is reverted.
-#define HAS_BOOL_INDICATOR 0
-#if HAS_BOOL_INDICATOR
-  LookupStatFn lookupBoolIndicator() {
-    return [this](const std::string& stat_name) -> std::string {
-      return scope_->boolIndicator(stat_name).name();
-    };
-  }
-#endif
 
   LookupStatFn lookupHistogramFn() {
-    return [this](const std::string& stat_name) -> std::string {
-      return scope_->histogramFromString(stat_name, Stats::Histogram::Unit::Unspecified).name();
+    return [this](const std::string& stat_name, Mode mode) -> std::string {
+      return scope_
+          ->histogramFromStatNameWithTags(makeStatName(stat_name), absl::nullopt,
+                                          Stats::Histogram::Unit::Unspecified, mode)
+          .name();
     };
   }
 
   LookupStatFn lookupTextReadoutFn() {
-    return [this](const std::string& stat_name) -> std::string {
-      return scope_->textReadoutFromString(stat_name).name();
+    return [this](const std::string& stat_name, Mode mode) -> std::string {
+      return scope_->textReadoutFromStatNameWithTags(makeStatName(stat_name), absl::nullopt, mode)
+          .name();
     };
   }
 
@@ -1034,6 +1108,7 @@ public:
   AllocatorImpl heap_alloc_;
   ThreadLocalStoreImpl store_;
   ScopePtr scope_;
+  StatNamePool pool_;
 };
 
 INSTANTIATE_TEST_SUITE_P(RememberStatsMatcherTest, RememberStatsMatcherTest,
@@ -1045,27 +1120,29 @@ TEST_P(RememberStatsMatcherTest, CounterRejectOne) { testRememberMatcher(lookupC
 
 TEST_P(RememberStatsMatcherTest, CounterRejectsAll) { testRejectsAll(lookupCounterFn()); }
 
+TEST_P(RememberStatsMatcherTest, CounterRejectsAllForceEnable) {
+  testRejectsAllForceEnable(lookupCounterFn());
+}
+
 TEST_P(RememberStatsMatcherTest, CounterAcceptsAll) { testAcceptsAll(lookupCounterFn()); }
 
 TEST_P(RememberStatsMatcherTest, GaugeRejectOne) { testRememberMatcher(lookupGaugeFn()); }
 
 TEST_P(RememberStatsMatcherTest, GaugeRejectsAll) { testRejectsAll(lookupGaugeFn()); }
 
-TEST_P(RememberStatsMatcherTest, GaugeAcceptsAll) { testAcceptsAll(lookupGaugeFn()); }
-
-#if HAS_BOOL_INDICATOR
-TEST_P(RememberStatsMatcherTest, BoolIndicatorRejectOne) {
-  testRememberMatcher(lookupBoolIndicator());
+TEST_P(RememberStatsMatcherTest, GaugeRejectsAllForceEnable) {
+  testRejectsAllForceEnable(lookupGaugeFn());
 }
 
-TEST_P(RememberStatsMatcherTest, BoolIndicatorRejectsAll) { testRejectsAll(lookupBoolIndicator()); }
-
-TEST_P(RememberStatsMatcherTest, BoolIndicatorAcceptsAll) { testAcceptsAll(lookupBoolIndicator()); }
-#endif
+TEST_P(RememberStatsMatcherTest, GaugeAcceptsAll) { testAcceptsAll(lookupGaugeFn()); }
 
 TEST_P(RememberStatsMatcherTest, HistogramRejectOne) { testRememberMatcher(lookupHistogramFn()); }
 
 TEST_P(RememberStatsMatcherTest, HistogramRejectsAll) { testRejectsAll(lookupHistogramFn()); }
+
+TEST_P(RememberStatsMatcherTest, HistogramRejectsAllForceEnable) {
+  testRejectsAllForceEnable(lookupHistogramFn());
+}
 
 TEST_P(RememberStatsMatcherTest, HistogramAcceptsAll) { testAcceptsAll(lookupHistogramFn()); }
 
@@ -1074,6 +1151,10 @@ TEST_P(RememberStatsMatcherTest, TextReadoutRejectOne) {
 }
 
 TEST_P(RememberStatsMatcherTest, TextReadoutRejectsAll) { testRejectsAll(lookupTextReadoutFn()); }
+
+TEST_P(RememberStatsMatcherTest, TextReadoutRejectsAllForceEnable) {
+  testRejectsAllForceEnable(lookupTextReadoutFn());
+}
 
 TEST_P(RememberStatsMatcherTest, TextReadoutAcceptsAll) { testAcceptsAll(lookupTextReadoutFn()); }
 
@@ -1619,7 +1700,7 @@ TEST_F(ClusterShutdownCleanupStarvationTest, TwelveThreadsWithBlockade) {
 
     // Here we show that the counter cleanups have finished, because the use-count is 1.
     CounterSharedPtr counter =
-        alloc_.makeCounter(my_counter_scoped_name_, StatName(), StatNameTagVector{});
+        alloc_.makeCounter(my_counter_scoped_name_, StatName(), StatNameTagVector{}, Mode::Default);
     EXPECT_EQ(1, counter->use_count()) << "index=" << i;
   }
 }
@@ -1644,7 +1725,7 @@ TEST_F(ClusterShutdownCleanupStarvationTest, TwelveThreadsWithoutBlockade) {
     // so we don't time out on asan/tsan tests, In opt builds this test takes
     // less than a second, and in fastbuild it takes less than 5.
     CounterSharedPtr counter =
-        alloc_.makeCounter(my_counter_scoped_name_, StatName(), StatNameTagVector{});
+        alloc_.makeCounter(my_counter_scoped_name_, StatName(), StatNameTagVector{}, Mode::Default);
     uint32_t use_count = counter->use_count() - 1; // Subtract off this instance.
     EXPECT_EQ((i + 1) * NumScopes * NumThreads, use_count);
   }

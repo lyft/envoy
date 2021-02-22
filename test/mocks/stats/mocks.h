@@ -143,6 +143,7 @@ public:
   MOCK_METHOD(void, reset, ());
   MOCK_METHOD(bool, used, (), (const));
   MOCK_METHOD(uint64_t, value, (), (const));
+  MOCK_METHOD(Mode, mode, (), (const));
 
   bool used_;
   uint64_t value_;
@@ -173,6 +174,7 @@ public:
   MOCK_METHOD(uint64_t, value, (), (const));
   MOCK_METHOD(absl::optional<bool>, cachedShouldImport, (), (const));
   MOCK_METHOD(ImportMode, importMode, (), (const));
+  MOCK_METHOD(Mode, mode, (), (const));
 
   bool used_;
   uint64_t value_;
@@ -195,6 +197,7 @@ public:
   MOCK_METHOD(bool, used, (), (const));
   MOCK_METHOD(Histogram::Unit, unit, (), (const));
   MOCK_METHOD(void, recordValue, (uint64_t value));
+  MOCK_METHOD(Mode, mode, (), (const));
 
   // RefcountInterface
   void incRefCount() override { refcount_helper_.incRefCount(); }
@@ -222,6 +225,7 @@ public:
   MOCK_METHOD(void, recordValue, (uint64_t value));
   MOCK_METHOD(const HistogramStatistics&, cumulativeStatistics, (), (const));
   MOCK_METHOD(const HistogramStatistics&, intervalStatistics, (), (const));
+  MOCK_METHOD(Mode, mode, (), (const));
 
   // RefcountInterface
   void incRefCount() override { refcount_helper_.incRefCount(); }
@@ -246,6 +250,7 @@ public:
   MOCK_METHOD(void, set, (absl::string_view value), (override));
   MOCK_METHOD(bool, used, (), (const, override));
   MOCK_METHOD(std::string, value, (), (const, override));
+  MOCK_METHOD(Mode, mode, (), (const));
 
   bool used_;
   std::string value_;
@@ -307,23 +312,23 @@ public:
   MOCK_METHOD(HistogramOptConstRef, findHistogram, (StatName), (const));
   MOCK_METHOD(TextReadoutOptConstRef, findTextReadout, (StatName), (const));
 
-  Counter& counterFromStatNameWithTags(const StatName& name,
-                                       StatNameTagVectorOptConstRef) override {
-    // We always just respond with the mocked counter, so the tags don't matter.
+  Counter& counterFromStatNameWithTags(const StatName& name, StatNameTagVectorOptConstRef,
+                                       Mode) override {
+    // We always just respond with the mocked counter, so the tags and mode don't matter.
     return counter(symbol_table_->toString(name));
   }
   Gauge& gaugeFromStatNameWithTags(const StatName& name, StatNameTagVectorOptConstRef,
-                                   Gauge::ImportMode import_mode) override {
-    // We always just respond with the mocked gauge, so the tags don't matter.
+                                   Gauge::ImportMode import_mode, Mode) override {
+    // We always just respond with the mocked gauge, so the tags and mode don't matter.
     return gauge(symbol_table_->toString(name), import_mode);
   }
   Histogram& histogramFromStatNameWithTags(const StatName& name, StatNameTagVectorOptConstRef,
-                                           Histogram::Unit unit) override {
+                                           Histogram::Unit unit, Mode) override {
     return histogram(symbol_table_->toString(name), unit);
   }
-  TextReadout& textReadoutFromStatNameWithTags(const StatName& name,
-                                               StatNameTagVectorOptConstRef) override {
-    // We always just respond with the mocked counter, so the tags don't matter.
+  TextReadout& textReadoutFromStatNameWithTags(const StatName& name, StatNameTagVectorOptConstRef,
+                                               Mode) override {
+    // We always just respond with the mocked counter, so the tags and mode don't matter.
     return textReadout(symbol_table_->toString(name));
   }
 

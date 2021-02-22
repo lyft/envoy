@@ -86,7 +86,7 @@ template <class StatMapClass, class StatListClass>
 void ThreadLocalStoreImpl::removeRejectedStats(StatMapClass& map, StatListClass& list) {
   StatNameVec remove_list;
   for (auto& stat : map) {
-    if (rejects(stat.first)) {
+    if (stat.second->mode() != Mode::ForceEnable && rejects(stat.first)) {
       remove_list.push_back(stat.first);
     }
   }
@@ -412,9 +412,10 @@ StatType& ThreadLocalStoreImpl::ScopeImpl::safeMakeStat(
     const absl::optional<StatNameTagVector>& stat_name_tags,
     StatNameHashMap<RefcountPtr<StatType>>& central_cache_map,
     StatNameStorageSet& central_rejected_stats, MakeStatFn<StatType> make_stat,
-    StatRefMap<StatType>* tls_cache, StatNameHashSet* tls_rejected_stats, StatType& null_stat) {
+    StatRefMap<StatType>* tls_cache, StatNameHashSet* tls_rejected_stats, StatType& null_stat,
+    Mode mode) {
 
-  if (tls_rejected_stats != nullptr &&
+  if (mode != Mode::ForceEnable && tls_rejected_stats != nullptr &&
       tls_rejected_stats->find(full_stat_name) != tls_rejected_stats->end()) {
     return null_stat;
   }
@@ -434,7 +435,8 @@ StatType& ThreadLocalStoreImpl::ScopeImpl::safeMakeStat(
   RefcountPtr<StatType>* central_ref = nullptr;
   if (iter != central_cache_map.end()) {
     central_ref = &(iter->second);
-  } else if (parent_.checkAndRememberRejection(full_stat_name, central_rejected_stats,
+  } else if (mode != Mode::ForceEnable &&
+             parent_.checkAndRememberRejection(full_stat_name, central_rejected_stats,
                                                tls_rejected_stats)) {
     return null_stat;
   } else {
@@ -472,8 +474,8 @@ StatTypeOptConstRef<StatType> ThreadLocalStoreImpl::ScopeImpl::findStatLockHeld(
 }
 
 Counter& ThreadLocalStoreImpl::ScopeImpl::counterFromStatNameWithTags(
-    const StatName& name, StatNameTagVectorOptConstRef stat_name_tags) {
-  if (parent_.rejectsAll()) {
+    const StatName& name, StatNameTagVectorOptConstRef stat_name_tags, Mode mode) {
+  if (parent_.rejectsAll() && mode != Mode::ForceEnable) {
     return parent_.null_counter_;
   }
 
@@ -502,11 +504,11 @@ Counter& ThreadLocalStoreImpl::ScopeImpl::counterFromStatNameWithTags(
   return safeMakeStat<Counter>(
       final_stat_name, joiner.tagExtractedName(), stat_name_tags, central_cache_->counters_,
       central_cache_->rejected_stats_,
-      [](Allocator& allocator, StatName name, StatName tag_extracted_name,
-         const StatNameTagVector& tags) -> CounterSharedPtr {
-        return allocator.makeCounter(name, tag_extracted_name, tags);
+      [mode](Allocator& allocator, StatName name, StatName tag_extracted_name,
+             const StatNameTagVector& tags) -> CounterSharedPtr {
+        return allocator.makeCounter(name, tag_extracted_name, tags, mode);
       },
-      tls_cache, tls_rejected_stats, parent_.null_counter_);
+      tls_cache, tls_rejected_stats, parent_.null_counter_, mode);
 }
 
 void ThreadLocalStoreImpl::ScopeImpl::deliverHistogramToSinks(const Histogram& histogram,
@@ -527,8 +529,8 @@ void ThreadLocalStoreImpl::ScopeImpl::deliverHistogramToSinks(const Histogram& h
 
 Gauge& ThreadLocalStoreImpl::ScopeImpl::gaugeFromStatNameWithTags(
     const StatName& name, StatNameTagVectorOptConstRef stat_name_tags,
-    Gauge::ImportMode import_mode) {
-  if (parent_.rejectsAll()) {
+    Gauge::ImportMode import_mode, Mode mode) {
+  if (parent_.rejectsAll() && mode != Mode::ForceEnable) {
     return parent_.null_gauge_;
   }
 
@@ -554,18 +556,19 @@ Gauge& ThreadLocalStoreImpl::ScopeImpl::gaugeFromStatNameWithTags(
   Gauge& gauge = safeMakeStat<Gauge>(
       final_stat_name, joiner.tagExtractedName(), stat_name_tags, central_cache_->gauges_,
       central_cache_->rejected_stats_,
-      [import_mode](Allocator& allocator, StatName name, StatName tag_extracted_name,
-                    const StatNameTagVector& tags) -> GaugeSharedPtr {
-        return allocator.makeGauge(name, tag_extracted_name, tags, import_mode);
+      [import_mode, mode](Allocator& allocator, StatName name, StatName tag_extracted_name,
+                          const StatNameTagVector& tags) -> GaugeSharedPtr {
+        return allocator.makeGauge(name, tag_extracted_name, tags, import_mode, mode);
       },
-      tls_cache, tls_rejected_stats, parent_.null_gauge_);
+      tls_cache, tls_rejected_stats, parent_.null_gauge_, mode);
   gauge.mergeImportMode(import_mode);
   return gauge;
 }
 
 Histogram& ThreadLocalStoreImpl::ScopeImpl::histogramFromStatNameWithTags(
-    const StatName& name, StatNameTagVectorOptConstRef stat_name_tags, Histogram::Unit unit) {
-  if (parent_.rejectsAll()) {
+    const StatName& name, StatNameTagVectorOptConstRef stat_name_tags, Histogram::Unit unit,
+    Mode mode) {
+  if (parent_.rejectsAll() && mode != Mode::ForceEnable) {
     return parent_.null_histogram_;
   }
 
@@ -591,7 +594,8 @@ Histogram& ThreadLocalStoreImpl::ScopeImpl::histogramFromStatNameWithTags(
       return *iter->second;
     }
     tls_rejected_stats = &entry.rejected_stats_;
-    if (tls_rejected_stats->find(final_stat_name) != tls_rejected_stats->end()) {
+    if (mode != Mode::ForceEnable &&
+        tls_rejected_stats->find(final_stat_name) != tls_rejected_stats->end()) {
       return parent_.null_histogram_;
     }
   }
@@ -601,7 +605,8 @@ Histogram& ThreadLocalStoreImpl::ScopeImpl::histogramFromStatNameWithTags(
   ParentHistogramImplSharedPtr* central_ref = nullptr;
   if (iter != central_cache_->histograms_.end()) {
     central_ref = &iter->second;
-  } else if (parent_.checkAndRememberRejection(final_stat_name, central_cache_->rejected_stats_,
+  } else if (mode != Mode::ForceEnable &&
+             parent_.checkAndRememberRejection(final_stat_name, central_cache_->rejected_stats_,
                                                tls_rejected_stats)) {
     return parent_.null_histogram_;
   } else {
@@ -619,7 +624,7 @@ Histogram& ThreadLocalStoreImpl::ScopeImpl::histogramFromStatNameWithTags(
       } else {
         stat = new ParentHistogramImpl(final_stat_name, unit, parent_,
                                        tag_helper.tagExtractedName(), tag_helper.statNameTags(),
-                                       *buckets, parent_.next_histogram_id_++);
+                                       *buckets, parent_.next_histogram_id_++, mode);
         if (!parent_.shutting_down_) {
           parent_.histogram_set_.insert(stat.get());
         }
@@ -637,8 +642,8 @@ Histogram& ThreadLocalStoreImpl::ScopeImpl::histogramFromStatNameWithTags(
 }
 
 TextReadout& ThreadLocalStoreImpl::ScopeImpl::textReadoutFromStatNameWithTags(
-    const StatName& name, StatNameTagVectorOptConstRef stat_name_tags) {
-  if (parent_.rejectsAll()) {
+    const StatName& name, StatNameTagVectorOptConstRef stat_name_tags, Mode mode) {
+  if (parent_.rejectsAll() && mode != Mode::ForceEnable) {
     return parent_.null_text_readout_;
   }
 
@@ -667,11 +672,11 @@ TextReadout& ThreadLocalStoreImpl::ScopeImpl::textReadoutFromStatNameWithTags(
   return safeMakeStat<TextReadout>(
       final_stat_name, joiner.tagExtractedName(), stat_name_tags, central_cache_->text_readouts_,
       central_cache_->rejected_stats_,
-      [](Allocator& allocator, StatName name, StatName tag_extracted_name,
-         const StatNameTagVector& tags) -> TextReadoutSharedPtr {
-        return allocator.makeTextReadout(name, tag_extracted_name, tags);
+      [mode](Allocator& allocator, StatName name, StatName tag_extracted_name,
+             const StatNameTagVector& tags) -> TextReadoutSharedPtr {
+        return allocator.makeTextReadout(name, tag_extracted_name, tags, mode);
       },
-      tls_cache, tls_rejected_stats, parent_.null_text_readout_);
+      tls_cache, tls_rejected_stats, parent_.null_text_readout_, mode);
 }
 
 CounterOptConstRef ThreadLocalStoreImpl::ScopeImpl::findCounter(StatName name) const {
@@ -759,12 +764,14 @@ ParentHistogramImpl::ParentHistogramImpl(StatName name, Histogram::Unit unit,
                                          ThreadLocalStoreImpl& thread_local_store,
                                          StatName tag_extracted_name,
                                          const StatNameTagVector& stat_name_tags,
-                                         ConstSupportedBuckets& supported_buckets, uint64_t id)
+                                         ConstSupportedBuckets& supported_buckets, uint64_t id,
+                                         Mode mode)
     : MetricImpl(name, tag_extracted_name, stat_name_tags, thread_local_store.symbolTable()),
       unit_(unit), thread_local_store_(thread_local_store), interval_histogram_(hist_alloc()),
       cumulative_histogram_(hist_alloc()),
       interval_statistics_(interval_histogram_, supported_buckets),
-      cumulative_statistics_(cumulative_histogram_, supported_buckets), merged_(false), id_(id) {}
+      cumulative_statistics_(cumulative_histogram_, supported_buckets), merged_(false), mode_(mode),
+      id_(id) {}
 
 ParentHistogramImpl::~ParentHistogramImpl() {
   thread_local_store_.releaseHistogramCrossThread(id_);

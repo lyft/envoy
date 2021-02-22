@@ -124,8 +124,8 @@ public:
   explicit IsolatedStoreImpl(SymbolTable& symbol_table);
 
   // Stats::Scope
-  Counter& counterFromStatNameWithTags(const StatName& name,
-                                       StatNameTagVectorOptConstRef tags) override {
+  Counter& counterFromStatNameWithTags(const StatName& name, StatNameTagVectorOptConstRef tags,
+                                       Mode) override {
     TagUtility::TagStatNameJoiner joiner(name, tags, symbolTable());
     Counter& counter = counters_.get(joiner.nameWithTags());
     return counter;
@@ -134,7 +134,7 @@ public:
   ScopePtr scopeFromStatName(StatName name) override;
   void deliverHistogramToSinks(const Histogram&, uint64_t) override {}
   Gauge& gaugeFromStatNameWithTags(const StatName& name, StatNameTagVectorOptConstRef tags,
-                                   Gauge::ImportMode import_mode) override {
+                                   Gauge::ImportMode import_mode, Mode) override {
     TagUtility::TagStatNameJoiner joiner(name, tags, symbolTable());
     Gauge& gauge = gauges_.get(joiner.nameWithTags(), import_mode);
     gauge.mergeImportMode(import_mode);
@@ -143,13 +143,13 @@ public:
   NullCounterImpl& nullCounter() { return *null_counter_; }
   NullGaugeImpl& nullGauge(const std::string&) override { return *null_gauge_; }
   Histogram& histogramFromStatNameWithTags(const StatName& name, StatNameTagVectorOptConstRef tags,
-                                           Histogram::Unit unit) override {
+                                           Histogram::Unit unit, Mode) override {
     TagUtility::TagStatNameJoiner joiner(name, tags, symbolTable());
     Histogram& histogram = histograms_.get(joiner.nameWithTags(), unit);
     return histogram;
   }
   TextReadout& textReadoutFromStatNameWithTags(const StatName& name,
-                                               StatNameTagVectorOptConstRef tags) override {
+                                               StatNameTagVectorOptConstRef tags, Mode) override {
     TagUtility::TagStatNameJoiner joiner(name, tags, symbolTable());
     TextReadout& text_readout =
         text_readouts_.get(joiner.nameWithTags(), TextReadout::Type::Default);
