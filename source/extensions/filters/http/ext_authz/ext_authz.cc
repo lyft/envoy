@@ -376,8 +376,16 @@ void Filter::continueDecoding() {
 }
 
 Filter::PerRouteFlags Filter::getPerRouteFlags(const Router::RouteConstSharedPtr& route) const {
-  if (route == nullptr || route->routeEntry() == nullptr) {
-    return PerRouteFlags{true /*skip_check_*/, false /*skip_request_body_buffering_*/};
+  if (route == nullptr) {
+    // If there's no route, skip authorization checks. This is an optimization to avoid work
+    // if we know the request won't be forwarded upstream anyway.
+    return PerRouteFlags::skipCheckFlags();
+  }
+
+  if (route->routeEntry() == nullptr && route->directResponseEntry() == nullptr) {
+    // If there's a route, but no route entry nor direct response entry, then skip authorization
+    // checks. This is another optimization.
+    return PerRouteFlags::skipCheckFlags();
   }
 
   const auto* specific_per_route_config =
@@ -388,7 +396,7 @@ Filter::PerRouteFlags Filter::getPerRouteFlags(const Router::RouteConstSharedPtr
                          specific_per_route_config->disableRequestBodyBuffering()};
   }
 
-  return PerRouteFlags{false /*skip_check_*/, false /*skip_request_body_buffering_*/};
+  return PerRouteFlags::defaultFlags();
 }
 
 } // namespace ExtAuthz

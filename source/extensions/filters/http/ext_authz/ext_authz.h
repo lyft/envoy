@@ -268,6 +268,10 @@ private:
   struct PerRouteFlags {
     const bool skip_check_;
     const bool skip_request_body_buffering_;
+
+    static constexpr PerRouteFlags defaultFlags() { return PerRouteFlags{false, false}; }
+
+    static constexpr PerRouteFlags skipCheckFlags() { return PerRouteFlags{true, false}; }
   };
   PerRouteFlags getPerRouteFlags(const Router::RouteConstSharedPtr& route) const;
 

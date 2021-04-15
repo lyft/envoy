@@ -27,6 +27,7 @@ Minor Behavior Changes
   logging, :ref:`auto_host_rewrite <envoy_api_field_route.RouteAction.auto_host_rewrite>`, etc.
   Setting the hostname manually allows overriding the internal hostname used for such features while
   still allowing the original DNS resolution name to be used.
+* ext_authz: routes that contain a redirect or a direct response action are now properly subject to external authorization checks by default. To restore the original behavior and skip authorization checks, disable ext_authz on the :ref:`per-route config <envoy_v3_api_msg_extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute>`.
 * grpc_json_transcoder: filter now adheres to encoder and decoder buffer limits. Requests and responses
   that require buffering over the limits will be directly rejected. The behavior can be reverted by
   disabling runtime feature `envoy.reloadable_features.grpc_json_transcoder_adhere_to_buffer_limits`.
