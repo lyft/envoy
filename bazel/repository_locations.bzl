@@ -640,11 +640,12 @@ REPOSITORY_LOCATIONS_SPEC = dict(
         project_desc = "Bazel rules for the C++ language",
         project_url = "https://github.com/bazelbuild/rules_cc",
         # TODO(lizan): pin to a point releases when there's a released version.
-        version = "b1c40e1de81913a3c40e5948f78719c28152486d",
-        sha256 = "71d037168733f26d2a9648ad066ee8da4a34a13f51d24843a42efa6b65c2420f",
+        # Pick up master to capture windows generate_pdb_file fix for opt build
+        version = "3401ea54a1ababfbff2660485cb606e990817291",
+        sha256 = "249f777dfd96476ad626cd66e0345da9719fd62a49142bdef4fd05a511386464",
         strip_prefix = "rules_cc-{version}",
         urls = ["https://github.com/bazelbuild/rules_cc/archive/{version}.tar.gz"],
-        release_date = "2020-11-11",
+        release_date = "2021-05-10",
         use_category = ["build"],
     ),
     rules_foreign_cc = dict(
