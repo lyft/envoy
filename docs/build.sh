@@ -59,6 +59,7 @@ export ENVOY_SRCDIR
 
 source_venv "$BUILD_DIR"
 pip3 install --require-hashes -r "${SCRIPT_DIR}"/requirements.txt
+pip3 install git+git://github.com/sphinx-contrib/httpdomain#egg=sphinxcontrib-httpdomain
 
 # Clean up any stale files in the API tree output. Bazel remembers valid cached
 # files still.
@@ -174,4 +175,4 @@ rsync -av \
 # To speed up validate_fragment invocations in validating_code_block
 bazel build "${BAZEL_BUILD_OPTIONS[@]}" //tools/config_validation:validate_fragment
 
-sphinx-build -W --keep-going -b html "${GENERATED_RST_DIR}" "${DOCS_OUTPUT_DIR}"
+time sphinx-build -j auto -W --keep-going -b html "${GENERATED_RST_DIR}" "${DOCS_OUTPUT_DIR}"
