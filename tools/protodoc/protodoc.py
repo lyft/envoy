@@ -106,18 +106,6 @@ for _k, _v in EXTENSION_DB.items():
     for _cat in _v['categories']:
         EXTENSION_CATEGORIES.setdefault(_cat, []).append(_k)
 
-V2_LINK_TEMPLATE = Template(
-    """
-This documentation is for the Envoy v3 API.
-
-As of Envoy v1.18 the v2 API has been removed and is no longer supported.
-
-If you are upgrading from v2 API config you may wish to view the v2 API documentation:
-
-    :ref:`{{v2_text}} <{{v2_url}}>`
-
-""")
-
 
 class ProtodocError(Exception):
     """Base error class for the protodoc module."""
@@ -256,7 +244,7 @@ def format_extension_category(extension_category):
         category=extension_category, extensions=sorted(extensions))
 
 
-def header_from_file(source_code_info, proto_name, title, v2_link):
+def header_from_file(source_code_info, proto_name, title):
     """Format RST header based on special file level title
 
     Args:
@@ -275,8 +263,7 @@ def header_from_file(source_code_info, proto_name, title, v2_link):
         file_header=title,
         file_extension=get_extension(
             source_code_info.file_level_annotations.get(annotations.EXTENSION_ANNOTATION)),
-        file_comments=stripped_comment,
-        file_v2_link=v2_link)
+        file_comments=stripped_comment)
 
 
 def format_field_type_as_json(type_context, field):
@@ -677,14 +664,6 @@ class RstFormatVisitor(visitor.Visitor):
         if hide_not_implemented(type_context.leading_comment):
             return {}
 
-        v2_link = ""
-        if file_proto.name in self.v2_mapping:
-            # TODO(phlax): remove _v2_ from filepath once sed mangling is removed
-            v2_filepath = f"envoy_v2_api_file_{self.v2_mapping[file_proto.name]}"
-            v2_text = v2_filepath.split('/', 1)[1]
-            v2_url = f"v{ENVOY_LAST_V2_VERSION}:{v2_filepath}"
-            v2_link = V2_LINK_TEMPLATE.render(v2_url=v2_url, v2_text=v2_text)
-
         return dict(
             anchor=message_cross_ref_label(normal_msg_type),
             header=normal_msg_type,
@@ -706,6 +685,13 @@ class RstFormatVisitor(visitor.Visitor):
             raise ProtodocError(
                 f"Envoy API proto file missing [#protodoc-title:] annotation: {file_proto.name}")
 
+        v2_link = {}
+        if file_proto.name in self.v2_mapping:
+            # TODO(phlax): remove _v2_ from filepath once sed mangling is removed
+            v2_filepath = f"envoy_v2_api_file_{self.v2_mapping[file_proto.name]}"
+            v2_link["text"] = v2_filepath.split('/', 1)[1]
+            v2_link["url"] = f"v{ENVOY_LAST_V2_VERSION}:{v2_filepath}"
+
         # Find the earliest detached comment, attribute it to file level.
         # Also extract file level titles if any.
         data = header_from_file(type_context.source_code_info, file_proto.name, title)
@@ -713,7 +699,11 @@ class RstFormatVisitor(visitor.Visitor):
             file_proto.options.Extensions.__getitem__(status_pb2.file_status) or object,
             "work_in_progress", False)
         # debug_proto = format_proto_as_block_comment(file_proto)
-        data.update(dict(work_in_progress=work_in_progress, msgs=msgs, enums=enums, has_messages=has_messages))
+        data.update(
+            dict(work_in_progress=work_in_progress,
+                 msgs=msgs, enums=enums,
+                 has_messages=has_messages,
+                 v2_link=v2_link))
         return self.template.render(data, trim_blocks=True, lstrip_blocks=True)
 
 

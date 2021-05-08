@@ -63,6 +63,17 @@ This extension may be referenced by the qualified name ``{{extension["name"]}}``
 {% endif %}
 {{file_comments}}
 
+{% if v2_link %}
+This documentation is for the Envoy v3 API.
+
+As of Envoy v1.18 the v2 API has been removed and is no longer supported.
+
+If you are upgrading from v2 API config you may wish to view the v2 API documentation:
+
+    :ref:`{{v2_link["text"]}} <{{v2_link["url"]}}>`
+
+{% endif %}
+
 {% if work_in_progress %}
 '.. warning::
   This API is work-in-progress and is subject to breaking changes.
