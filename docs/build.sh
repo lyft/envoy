@@ -5,6 +5,8 @@
 
 . tools/shell_utils.sh
 
+#MAKEFAIL
+
 set -e
 
 RELEASE_TAG_REGEX="^refs/tags/v.*"

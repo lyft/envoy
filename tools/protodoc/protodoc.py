@@ -55,27 +55,6 @@ UNICODE_INVISIBLE_SEPARATOR = u'\u2063'
 DATA_PLANE_API_URL_FMT = 'https://github.com/envoyproxy/envoy/blob/{}/api/%s#L%d'.format(
     os.environ['ENVOY_BLOB_SHA'])
 
-# Template for formating extension descriptions.
-EXTENSION_TEMPLATE = Template(
-    """
-.. _extension_{{extension}}:
-
-This extension may be referenced by the qualified name ``{{extension}}``
-
-.. note::
-  {{status}}
-
-  {{security_posture}}
-
-.. tip::
-  This extension extends and can be used with the following extension {% if categories|length > 1 %}categories{% else %}category{% endif %}:
-
-{% for cat in categories %}
-  - :ref:`{{cat}} <extension_category_{{cat}}>`
-{% endfor %}
-
-""")
-
 # Template for formating an extension category.
 EXTENSION_CATEGORY_TEMPLATE = Template(
     """
@@ -127,18 +106,6 @@ for _k, _v in EXTENSION_DB.items():
     for _cat in _v['categories']:
         EXTENSION_CATEGORIES.setdefault(_cat, []).append(_k)
 
-V2_LINK_TEMPLATE = Template(
-    """
-This documentation is for the Envoy v3 API.
-
-As of Envoy v1.18 the v2 API has been removed and is no longer supported.
-
-If you are upgrading from v2 API config you may wish to view the v2 API documentation:
-
-    :ref:`{{v2_text}} <{{v2_url}}>`
-
-""")
-
 
 class ProtodocError(Exception):
     """Base error class for the protodoc module."""
@@ -164,7 +131,7 @@ def github_url(type_context):
     return ''
 
 
-def format_comment_with_annotations(comment, type_name=''):
+def get_info(comment, type_name=''):
     """Format a comment string with additional RST for annotations.
 
     Args:
@@ -175,16 +142,16 @@ def format_comment_with_annotations(comment, type_name=''):
     Returns:
         A string with additional RST from annotations.
     """
-    formatted_extension = ''
-    if annotations.EXTENSION_ANNOTATION in comment.annotations:
-        extension = comment.annotations[annotations.EXTENSION_ANNOTATION]
-        formatted_extension = format_extension(extension)
+    extension = get_extension(comment.annotations.get(annotations.EXTENSION_ANNOTATION))
     formatted_extension_category = ''
     if annotations.EXTENSION_CATEGORY_ANNOTATION in comment.annotations:
         for category in comment.annotations[annotations.EXTENSION_CATEGORY_ANNOTATION].split(","):
             formatted_extension_category += format_extension_category(category)
     comment = annotations.without_annotations(strip_leading_space(comment.raw) + '\n')
-    return comment + formatted_extension + formatted_extension_category
+    return dict(
+        comment=comment,
+        extension=extension,
+        extension_category=formatted_extension_category)
 
 
 def map_lines(f, s):
@@ -231,7 +198,7 @@ def format_header(style, text):
     return '%s\n%s\n\n' % (text, style * len(text))
 
 
-def format_extension(extension):
+def get_extension(extension):
     """Format extension metadata as RST.
 
     Args:
@@ -240,6 +207,8 @@ def format_extension(extension):
     Returns:
         RST formatted extension description.
     """
+    if not extension:
+        return {}
     try:
         extension_metadata = EXTENSION_DB[extension]
         status = EXTENSION_STATUS_VALUES.get(extension_metadata['status'], '')
@@ -251,8 +220,8 @@ def format_extension(extension):
         )
         exit(1)  # Raising the error buries the above message in tracebacks.
 
-    return EXTENSION_TEMPLATE.render(
-        extension=extension,
+    return dict(
+        name=extension,
         status=status,
         security_posture=security_posture,
         categories=categories)
@@ -273,33 +242,6 @@ def format_extension_category(extension_category):
         raise ProtodocError(f"\n\nUnable to find extension category:  {extension_category}\n\n")
     return EXTENSION_CATEGORY_TEMPLATE.render(
         category=extension_category, extensions=sorted(extensions))
-
-
-def format_header_from_file(style, source_code_info, proto_name, v2_link):
-    """Format RST header based on special file level title
-
-    Args:
-        style: underline style, e.g. '=', '-'.
-        source_code_info: SourceCodeInfo object.
-        proto_name: If the file_level_comment does not contain a user specified
-           title, use this as page title.
-
-    Returns:
-        RST formatted header, and file level comment without page title strings.
-    """
-    anchor = format_anchor(file_cross_ref_label(proto_name))
-    stripped_comment = annotations.without_annotations(
-        strip_leading_space('\n'.join(c + '\n' for c in source_code_info.file_level_comments)))
-    formatted_extension = ''
-    if annotations.EXTENSION_ANNOTATION in source_code_info.file_level_annotations:
-        extension = source_code_info.file_level_annotations[annotations.EXTENSION_ANNOTATION]
-        formatted_extension = format_extension(extension)
-    if annotations.DOC_TITLE_ANNOTATION in source_code_info.file_level_annotations:
-        return anchor + format_header(
-            style, source_code_info.file_level_annotations[annotations.DOC_TITLE_ANNOTATION]
-        ) + v2_link + "\n\n" + formatted_extension, stripped_comment
-    return anchor + format_header(
-        style, proto_name) + v2_link + "\n\n" + formatted_extension, stripped_comment
 
 
 def format_field_type_as_json(type_context, field):
@@ -446,11 +388,6 @@ def strip_leading_space(s):
     return map_lines(lambda s: s[1:], s)
 
 
-def file_cross_ref_label(msg_name):
-    """File cross reference label."""
-    return 'envoy_api_file_%s' % msg_name
-
-
 def message_cross_ref_label(msg_name):
     """Message cross reference label."""
     return 'envoy_api_msg_%s' % msg_name
@@ -502,7 +439,7 @@ def format_security_options(security_option, field, type_context, edge_config):
     return '.. attention::\n' + '\n\n'.join(sections)
 
 
-def format_field_as_definition_list_item(
+def get_field_item(
         outer_type_context, type_context, field, protodoc_manifest):
     """Format a FieldDescriptorProto as RST definition list item.
 
@@ -527,16 +464,16 @@ def format_field_as_definition_list_item(
                 or (rule.HasField('repeated') and rule.repeated.min_items > 0)):
             field_annotations = ['*REQUIRED*']
     leading_comment = type_context.leading_comment
-    formatted_leading_comment = format_comment_with_annotations(leading_comment)
+    formatted_leading_comment = get_info(leading_comment)
     if hide_not_implemented(leading_comment):
         return ''
 
+    oneof = {}
+    formatted_oneof = ''
     if field.HasField('oneof_index'):
         oneof_context = outer_type_context.extend_oneof(
             field.oneof_index, type_context.oneof_names[field.oneof_index])
-        oneof_comment = oneof_context.leading_comment
-        formatted_oneof_comment = format_comment_with_annotations(oneof_comment)
-        if hide_not_implemented(oneof_comment):
+        if hide_not_implemented(oneof_context.leading_comment):
             return ''
 
         # If the oneof only has one field and marked required, mark the field as required.
@@ -549,14 +486,13 @@ def format_field_as_definition_list_item(
             field_annotations = []
             oneof_template = '\nPrecisely one of %s must be set.\n' if type_context.oneof_required[
                 field.oneof_index] else '\nOnly one of %s may be set.\n'
-            formatted_oneof_comment += oneof_template % ', '.join(
+            oneof=get_info(oneof_context.leading_comment)
+            formatted_oneof += oneof_template % ', '.join(
                 format_internal_link(
                     f,
                     field_cross_ref_label(
                         normalize_type_context_name(outer_type_context.extend_field(i, f).name)))
                 for i, f in type_context.oneof_fields[field.oneof_index])
-    else:
-        formatted_oneof_comment = ''
 
     # If there is a udpa.annotations.security option, include it after the comment.
     if field.options.HasExtension(security_pb2.security):
@@ -574,13 +510,17 @@ def format_field_as_definition_list_item(
     }
     comment = '(%s) ' % ', '.join(
         [pretty_label_names[field.label] + format_field_type(type_context, field)]
-        + field_annotations) + formatted_leading_comment
-    return anchor + field.name + '\n' + map_lines(
-        functools.partial(indent, 2),
-        comment + formatted_oneof_comment) + formatted_security_options
+        + field_annotations) + str(formatted_leading_comment)
+    return dict(
+        anchor=anchor,
+        name=field.name,
+        comment=comment.split("\n"),
+        oneof=oneof,
+        formatted_oneof=formatted_oneof.split("\n"),
+        security_options=formatted_security_options)
 
 
-def format_message_as_definition_list(type_context, msg, protodoc_manifest):
+def get_fields(type_context, msg, protodoc_manifest):
     """Format a DescriptorProto as RST definition list.
 
     Args:
@@ -605,10 +545,10 @@ def format_message_as_definition_list(type_context, msg, protodoc_manifest):
             type_context.oneof_required[index] = oneof_decl.options.Extensions[
                 validate_pb2.required]
         type_context.oneof_names[index] = oneof_decl.name
-    return '\n'.join(
-        format_field_as_definition_list_item(
+    return [
+        get_field_item(
             type_context, type_context.extend_field(index, field.name), field, protodoc_manifest)
-        for index, field in enumerate(msg.field)) + '\n'
+        for index, field in enumerate(msg.field)]
 
 
 def format_enum_value_as_definition_list_item(type_context, enum_value):
@@ -624,11 +564,9 @@ def format_enum_value_as_definition_list_item(type_context, enum_value):
     anchor = format_anchor(
         enum_value_cross_ref_label(normalize_type_context_name(type_context.name)))
     default_comment = '*(DEFAULT)* ' if enum_value.number == 0 else ''
-    leading_comment = type_context.leading_comment
-    formatted_leading_comment = format_comment_with_annotations(leading_comment)
-    if hide_not_implemented(leading_comment):
+    if hide_not_implemented(type_context.leading_comment):
         return ''
-    comment = default_comment + UNICODE_INVISIBLE_SEPARATOR + formatted_leading_comment
+    comment = default_comment + UNICODE_INVISIBLE_SEPARATOR + str(get_info(type_context.leading_comment))
     return anchor + enum_value.name + '\n' + map_lines(functools.partial(indent, 2), comment)
 
 
@@ -668,6 +606,9 @@ class RstFormatVisitor(visitor.Visitor):
         with open(r.Rlocation('envoy/docs/v2_mapping.json'), 'r') as f:
             self.v2_mapping = json.load(f)
 
+        with open(r.Rlocation('envoy/tools/protodoc/protodoc.template.rst'), 'r') as f:
+            self.template = Template(f.read())
+
         with open(r.Rlocation('envoy/docs/protodoc_manifest.yaml'), 'r') as f:
             # Load as YAML, emit as JSON and then parse as proto to provide type
             # checking.
@@ -675,78 +616,83 @@ class RstFormatVisitor(visitor.Visitor):
             self.protodoc_manifest = manifest_pb2.Manifest()
             json_format.Parse(json.dumps(protodoc_manifest_untyped), self.protodoc_manifest)
 
+    def get_v2_link(self, proto_name):
+        if proto_name not in self.v2_mapping:
+            return {}
+        # TODO(phlax): remove _v2_ from filepath once sed mangling is removed
+        v2_filepath = f"envoy_v2_api_file_{self.v2_mapping[proto_name]}"
+        return dict(
+            text=v2_filepath.split('/', 1)[1],
+            url=f"v{ENVOY_LAST_V2_VERSION}:{v2_filepath}")
+
+    def get_comment(self, comment):
+        stripped = annotations.without_annotations('\n'.join(comment))
+        return "\n".join(
+            c[1:]
+            for c in stripped.split("\n"))[1:]
+
+    def get_file(self, source_code_info, file_proto):
+        return dict(
+            proto=file_proto.name,
+            title=source_code_info.file_level_annotations.get(annotations.DOC_TITLE_ANNOTATION),
+            extension=get_extension(
+                source_code_info.file_level_annotations.get(annotations.EXTENSION_ANNOTATION)),
+            comment=self.get_comment(source_code_info.file_level_comments),
+            work_in_progress=getattr(
+                file_proto.options.Extensions.__getitem__(status_pb2.file_status) or object,
+                "work_in_progress", False),
+            v2_link=self.get_v2_link(file_proto.name))
+
     def visit_enum(self, enum_proto, type_context):
         normal_enum_type = normalize_type_context_name(type_context.name)
-        anchor = format_anchor(enum_cross_ref_label(normal_enum_type))
-        header = format_header('-', 'Enum %s' % normal_enum_type)
         _github_url = github_url(type_context)
         proto_link = format_external_link('[%s proto]' % normal_enum_type, _github_url) + '\n\n'
         leading_comment = type_context.leading_comment
-        formatted_leading_comment = format_comment_with_annotations(leading_comment, 'enum')
+        formatted_leading_comment = get_info(leading_comment, 'enum')
         if hide_not_implemented(leading_comment):
             return ''
-        return anchor + header + proto_link + formatted_leading_comment + format_enum_as_definition_list(
-            type_context, enum_proto)
+        return dict(
+            anchor=enum_cross_ref_label(normal_enum_type),
+            header=f"Enum {normal_enum_type}",
+            proto_link=proto_link,
+            formatted_leading_comment=formatted_leading_comment,
+            dl_enum=format_enum_as_definition_list(type_context, enum_proto))
 
     def visit_message(self, msg_proto, type_context, nested_msgs, nested_enums):
         # Skip messages synthesized to represent map types.
         if msg_proto.options.map_entry:
             return ''
         normal_msg_type = normalize_type_context_name(type_context.name)
-        anchor = format_anchor(message_cross_ref_label(normal_msg_type))
-        header = format_header('-', normal_msg_type)
         _github_url = github_url(type_context)
         proto_link = format_external_link('[%s proto]' % normal_msg_type, _github_url) + '\n\n'
-        leading_comment = type_context.leading_comment
-        formatted_leading_comment = format_comment_with_annotations(leading_comment, 'message')
-        if hide_not_implemented(leading_comment):
-            return ''
 
-        return anchor + header + proto_link + formatted_leading_comment + format_message_as_json(
-            type_context, msg_proto) + format_message_as_definition_list(
-                type_context, msg_proto,
-                self.protodoc_manifest) + '\n'.join(nested_msgs) + '\n' + '\n'.join(nested_enums)
+        if hide_not_implemented(type_context.leading_comment):
+            return {}
+
+        return dict(
+            anchor=message_cross_ref_label(normal_msg_type),
+            header=normal_msg_type,
+            proto_link=proto_link,
+            msg_comment=get_info(type_context.leading_comment, 'message'),
+            json_message=format_message_as_json(type_context, msg_proto),
+            fields=get_fields(type_context, msg_proto, self.protodoc_manifest),
+            messages=nested_msgs,
+            enums=nested_enums)
 
     def visit_file(self, file_proto, type_context, services, msgs, enums):
-        has_messages = True
-        if all(len(msg) == 0 for msg in msgs) and all(len(enum) == 0 for enum in enums):
-            has_messages = False
-
-        v2_link = ""
-        if file_proto.name in self.v2_mapping:
-            # TODO(phlax): remove _v2_ from filepath once sed mangling is removed
-            v2_filepath = f"envoy_v2_api_file_{self.v2_mapping[file_proto.name]}"
-            v2_text = v2_filepath.split('/', 1)[1]
-            v2_url = f"v{ENVOY_LAST_V2_VERSION}:{v2_filepath}"
-            v2_link = V2_LINK_TEMPLATE.render(v2_url=v2_url, v2_text=v2_text)
-
-        # TODO(mattklein123): The logic in both the doc and transform tool around files without messages
-        # is confusing and should be cleaned up. This is a stop gap to have titles for all proto docs
-        # in the common case.
-        if (has_messages and not annotations.DOC_TITLE_ANNOTATION
-                in type_context.source_code_info.file_level_annotations
-                and file_proto.name.startswith('envoy')):
+        data = dict(
+            file=self.get_file(type_context.source_code_info, file_proto),
+            has_messages=bool(sum(len(item) for item in msgs + enums) > 0),
+            msgs=msgs,
+            enums=enums)
+        missing_title = (
+            data["has_messages"]
+            and not data["file"]["title"]
+            and file_proto.name.startswith('envoy'))
+        if missing_title:
             raise ProtodocError(
-                'Envoy API proto file missing [#protodoc-title:] annotation: {}'.format(
-                    file_proto.name))
-
-        # Find the earliest detached comment, attribute it to file level.
-        # Also extract file level titles if any.
-        header, comment = format_header_from_file(
-            '=', type_context.source_code_info, file_proto.name, v2_link)
-        # If there are no messages, we don't include in the doc tree (no support for
-        # service rendering yet). We allow these files to be missing from the
-        # toctrees.
-        if not has_messages:
-            header = ':orphan:\n\n' + header
-        warnings = ''
-        if file_proto.options.HasExtension(status_pb2.file_status):
-            if file_proto.options.Extensions[status_pb2.file_status].work_in_progress:
-                warnings += (
-                    '.. warning::\n   This API is work-in-progress and is '
-                    'subject to breaking changes.\n\n')
-        # debug_proto = format_proto_as_block_comment(file_proto)
-        return header + warnings + comment + '\n'.join(msgs) + '\n'.join(enums)  # + debug_proto
+                f"Envoy API proto file missing [#protodoc-title:] annotation: {file_proto.name}")
+        return self.template.render(data, trim_blocks=True, lstrip_blocks=True)
 
 
 def main():
