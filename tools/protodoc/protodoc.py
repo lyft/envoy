@@ -244,28 +244,6 @@ def format_extension_category(extension_category):
         category=extension_category, extensions=sorted(extensions))
 
 
-def header_from_file(source_code_info, proto_name, title):
-    """Format RST header based on special file level title
-
-    Args:
-        style: underline style, e.g. '=', '-'.
-        source_code_info: SourceCodeInfo object.
-        proto_name: If the file_level_comment does not contain a user specified
-           title, use this as page title.
-
-    Returns:
-        RST formatted header, and file level comment without page title strings.
-    """
-    stripped_comment = annotations.without_annotations(
-        strip_leading_space('\n'.join(c + '\n' for c in source_code_info.file_level_comments)))
-    return dict(
-        file_anchor=file_cross_ref_label(proto_name),
-        file_header=title,
-        file_extension=get_extension(
-            source_code_info.file_level_annotations.get(annotations.EXTENSION_ANNOTATION)),
-        file_comments=stripped_comment)
-
-
 def format_field_type_as_json(type_context, field):
     """Format FieldDescriptorProto.Type as a pseudo-JSON string.
 
@@ -410,11 +388,6 @@ def strip_leading_space(s):
     return map_lines(lambda s: s[1:], s)
 
 
-def file_cross_ref_label(msg_name):
-    """File cross reference label."""
-    return 'envoy_api_file_%s' % msg_name
-
-
 def message_cross_ref_label(msg_name):
     """Message cross reference label."""
     return 'envoy_api_msg_%s' % msg_name
@@ -495,7 +468,8 @@ def get_field_item(
     if hide_not_implemented(leading_comment):
         return ''
 
-    formatted_oneof_comment = ''
+    oneof = {}
+    formatted_oneof = ''
     if field.HasField('oneof_index'):
         oneof_context = outer_type_context.extend_oneof(
             field.oneof_index, type_context.oneof_names[field.oneof_index])
@@ -512,8 +486,8 @@ def get_field_item(
             field_annotations = []
             oneof_template = '\nPrecisely one of %s must be set.\n' if type_context.oneof_required[
                 field.oneof_index] else '\nOnly one of %s may be set.\n'
-            formatted_oneof_comment = str(get_info(oneof_context.leading_comment))
-            formatted_oneof_comment += oneof_template % ', '.join(
+            oneof=get_info(oneof_context.leading_comment)
+            formatted_oneof += oneof_template % ', '.join(
                 format_internal_link(
                     f,
                     field_cross_ref_label(
@@ -540,7 +514,9 @@ def get_field_item(
     return dict(
         anchor=anchor,
         name=field.name,
-        comment=comment.split("\n") + formatted_oneof_comment.split("\n"),
+        comment=comment.split("\n"),
+        oneof=oneof,
+        formatted_oneof=formatted_oneof.split("\n"),
         security_options=formatted_security_options)
 
 
@@ -640,6 +616,33 @@ class RstFormatVisitor(visitor.Visitor):
             self.protodoc_manifest = manifest_pb2.Manifest()
             json_format.Parse(json.dumps(protodoc_manifest_untyped), self.protodoc_manifest)
 
+    def get_v2_link(self, proto_name):
+        if proto_name not in self.v2_mapping:
+            return {}
+        # TODO(phlax): remove _v2_ from filepath once sed mangling is removed
+        v2_filepath = f"envoy_v2_api_file_{self.v2_mapping[proto_name]}"
+        return dict(
+            text=v2_filepath.split('/', 1)[1],
+            url=f"v{ENVOY_LAST_V2_VERSION}:{v2_filepath}")
+
+    def get_comment(self, comment):
+        stripped = annotations.without_annotations('\n'.join(comment))
+        return "\n".join(
+            c[1:]
+            for c in stripped.split("\n"))[1:]
+
+    def get_file(self, source_code_info, file_proto):
+        return dict(
+            proto=file_proto.name,
+            title=source_code_info.file_level_annotations.get(annotations.DOC_TITLE_ANNOTATION),
+            extension=get_extension(
+                source_code_info.file_level_annotations.get(annotations.EXTENSION_ANNOTATION)),
+            comment=self.get_comment(source_code_info.file_level_comments),
+            work_in_progress=getattr(
+                file_proto.options.Extensions.__getitem__(status_pb2.file_status) or object,
+                "work_in_progress", False),
+            v2_link=self.get_v2_link(file_proto.name))
+
     def visit_enum(self, enum_proto, type_context):
         normal_enum_type = normalize_type_context_name(type_context.name)
         _github_url = github_url(type_context)
@@ -677,35 +680,18 @@ class RstFormatVisitor(visitor.Visitor):
             enums=nested_enums)
 
     def visit_file(self, file_proto, type_context, services, msgs, enums):
-        has_messages = bool(sum(len(item) for item in msgs + enums) > 0)
-        title = type_context.source_code_info.file_level_annotations.get(annotations.DOC_TITLE_ANNOTATION)
+        data = dict(
+            file=self.get_file(type_context.source_code_info, file_proto),
+            has_messages=bool(sum(len(item) for item in msgs + enums) > 0),
+            msgs=msgs,
+            enums=enums)
         missing_title = (
-            has_messages
-            and not title
+            data["has_messages"]
+            and not data["file"]["title"]
             and file_proto.name.startswith('envoy'))
         if missing_title:
             raise ProtodocError(
                 f"Envoy API proto file missing [#protodoc-title:] annotation: {file_proto.name}")
-
-        v2_link = {}
-        if file_proto.name in self.v2_mapping:
-            # TODO(phlax): remove _v2_ from filepath once sed mangling is removed
-            v2_filepath = f"envoy_v2_api_file_{self.v2_mapping[file_proto.name]}"
-            v2_link["text"] = v2_filepath.split('/', 1)[1]
-            v2_link["url"] = f"v{ENVOY_LAST_V2_VERSION}:{v2_filepath}"
-
-        # Find the earliest detached comment, attribute it to file level.
-        # Also extract file level titles if any.
-        data = header_from_file(type_context.source_code_info, file_proto.name, title)
-        work_in_progress = getattr(
-            file_proto.options.Extensions.__getitem__(status_pb2.file_status) or object,
-            "work_in_progress", False)
-        # debug_proto = format_proto_as_block_comment(file_proto)
-        data.update(
-            dict(work_in_progress=work_in_progress,
-                 msgs=msgs, enums=enums,
-                 has_messages=has_messages,
-                 v2_link=v2_link))
         return self.template.render(data, trim_blocks=True, lstrip_blocks=True)
 
 

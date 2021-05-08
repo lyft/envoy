@@ -36,7 +36,7 @@ This extension may be referenced by the qualified name ``{{extension["name"]}}``
 
 {{format_header(msg["header"], "-")}}
 {{msg["proto_link"]}}
-{{msg["formatted_leading_comment"]}}
+{{msg["msg_comment"]}}
 {{msg["json_message"]}}
 {% for field in msg["fields"] %}
 {{field["anchor"]}}
@@ -44,6 +44,13 @@ This extension may be referenced by the qualified name ``{{extension["name"]}}``
 {% for line in field["comment"] %}
   {{line}}
 {% endfor %}
+
+{{field["oneof"]}}
+
+{% for line in field["formatted_oneof"] %}
+  {{line}}
+{% endfor %}
+
 {{field["security_options"]}}
 {% endfor %}
 
@@ -56,41 +63,37 @@ This extension may be referenced by the qualified name ``{{extension["name"]}}``
 {% endfor %}
 {% endmacro -%}
 
-.. _{{file_anchor}}:
+.. _envoy_v3_api_file_{{file["proto"]}}:
 
-{% if not has_messages %}
+{% if not has_messages -%}
 :orphan:
 
-{% endif %}
-{% if file_header %}
-{{format_header(file_header)}}
-{% endif %}
-{% if file_extension %}
-{{format_extension(file_extension)}}
-{% endif %}
-{{file_comments}}
-
-{% if v2_link %}
+{%- endif -%}
+{% if file["title"] -%}
+{{format_header(file["title"])}}
+{%- endif -%}
+{% if file["extension"] -%}
+{{format_extension(file["extension"])}}
+{%- endif %}
+{{file["comment"]}}
+{% if file["v2_link"] -%}
 This documentation is for the Envoy v3 API.
 
 As of Envoy v1.18 the v2 API has been removed and is no longer supported.
 
 If you are upgrading from v2 API config you may wish to view the v2 API documentation:
 
-    :ref:`{{v2_link["text"]}} <{{v2_link["url"]}}>`
+    :ref:`{{file["v2_link"]["text"]}} <{{file["v2_link"]["url"]}}>`
 
-{% endif %}
-
-{% if work_in_progress %}
-'.. warning::
+{% endif -%}
+{% if file["work_in_progress"] -%}
+.. warning::
   This API is work-in-progress and is subject to breaking changes.
 
-{% endif %}
-
+{% endif -%}
 {% for msg in msgs %}
 {{format_message(msg)}}
-{% endfor %}
-
+{%- endfor -%}
 {% for enum in enums %}
 {{format_enum(enum)}}
 {% endfor %}
