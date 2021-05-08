@@ -466,7 +466,7 @@ def format_security_options(security_option, field, type_context, edge_config):
     return '.. attention::\n' + '\n\n'.join(sections)
 
 
-def format_field_as_definition_list_item(
+def get_field_item(
         outer_type_context, type_context, field, protodoc_manifest):
     """Format a FieldDescriptorProto as RST definition list item.
 
@@ -537,12 +537,14 @@ def format_field_as_definition_list_item(
     comment = '(%s) ' % ', '.join(
         [pretty_label_names[field.label] + format_field_type(type_context, field)]
         + field_annotations) + str(formatted_leading_comment)
-    return anchor + field.name + '\n' + map_lines(
-        functools.partial(indent, 2),
-        comment + formatted_oneof_comment) + formatted_security_options
+    return dict(
+        anchor=anchor,
+        name=field.name,
+        comment=comment.split("\n") + formatted_oneof_comment.split("\n"),
+        security_options=formatted_security_options)
 
 
-def format_message_as_definition_list(type_context, msg, protodoc_manifest):
+def get_fields(type_context, msg, protodoc_manifest):
     """Format a DescriptorProto as RST definition list.
 
     Args:
@@ -567,10 +569,10 @@ def format_message_as_definition_list(type_context, msg, protodoc_manifest):
             type_context.oneof_required[index] = oneof_decl.options.Extensions[
                 validate_pb2.required]
         type_context.oneof_names[index] = oneof_decl.name
-    return '\n'.join(
-        format_field_as_definition_list_item(
+    return [
+        get_field_item(
             type_context, type_context.extend_field(index, field.name), field, protodoc_manifest)
-        for index, field in enumerate(msg.field)) + '\n'
+        for index, field in enumerate(msg.field)]
 
 
 def format_enum_value_as_definition_list_item(type_context, enum_value):
@@ -670,7 +672,7 @@ class RstFormatVisitor(visitor.Visitor):
             proto_link=proto_link,
             msg_comment=get_info(type_context.leading_comment, 'message'),
             json_message=format_message_as_json(type_context, msg_proto),
-            dl_message=format_message_as_definition_list(type_context, msg_proto, self.protodoc_manifest),
+            fields=get_fields(type_context, msg_proto, self.protodoc_manifest),
             messages=nested_msgs,
             enums=nested_enums)
 

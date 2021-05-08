@@ -38,7 +38,14 @@ This extension may be referenced by the qualified name ``{{extension["name"]}}``
 {{msg["proto_link"]}}
 {{msg["formatted_leading_comment"]}}
 {{msg["json_message"]}}
-{{msg["dl_message"]}}
+{% for field in msg["fields"] %}
+{{field["anchor"]}}
+{{field["name"]}}
+{% for line in field["comment"] %}
+  {{line}}
+{% endfor %}
+{{field["security_options"]}}
+{% endfor %}
 
 {% for nested_msg in msg["messages"] -%}
 {{format_message(nested_msg)}}
