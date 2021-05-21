@@ -201,6 +201,7 @@ build:rbe-toolchain-msvc-cl --platforms=@rbe_windows_msvc_cl//config:platform
 build:rbe-toolchain-msvc-cl --crosstool_top=@rbe_windows_msvc_cl//cc:toolchain
 build:rbe-toolchain-msvc-cl --extra_toolchains=@rbe_windows_msvc_cl//config:cc-toolchain
 
+build:rbe-toolchain-clang-cl --action_env=LLVM_VERSION=11.1.0
 build:rbe-toolchain-clang-cl --host_platform=@rbe_windows_clang_cl//config:platform
 build:rbe-toolchain-clang-cl --platforms=@rbe_windows_clang_cl//config:platform
 build:rbe-toolchain-clang-cl --crosstool_top=@rbe_windows_clang_cl//cc:toolchain
@@ -333,7 +334,6 @@ build:windows --action_env=TMPDIR
 build:windows --define signal_trace=disabled
 build:windows --define hot_restart=disabled
 build:windows --define tcmalloc=disabled
-build:windows --define wasm=disabled
 build:windows --define manual_stamp=manual_stamp
 build:windows --cxxopt="/std:c++17"
 

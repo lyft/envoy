@@ -1,6 +1,9 @@
 # 1. Fix linking with unbundled toolchain on macOS.
 # 2. Increase VSZ limit to 64 TiB (allows us to start up to 6,553 VMs).
 # 3. Fix building and linking with MSAN.
+# 4. Don't try to setup Windows x86 toolchain.
+# 5. Fix linking on Windows.
+# 6. Fix building with clang-cl on Windows.
 --- wee8/build/toolchain/gcc_toolchain.gni
 +++ wee8/build/toolchain/gcc_toolchain.gni
 @@ -348,6 +348,8 @@ template("gcc_toolchain") {
@@ -67,3 +70,69 @@
    # Pass the same C/C++ flags to the objective C/C++ compiler.
    cflags_objc += cflags_c
    cflags_objcc += cflags_cc
+--- wee8/build/toolchain/win/BUILD.gn
++++ wee8/build/toolchain/win/BUILD.gn
+@@ -459,7 +459,7 @@ template("win_toolchains") {
+
+     sys_include_flags = "${win_toolchain_data.include_flags_imsvc}"
+     sys_lib_flags =
+-        "-libpath:$_clang_lib_dir ${win_toolchain_data.libpath_flags}"
++        "\"-libpath:$_clang_lib_dir\" ${win_toolchain_data.libpath_flags}"
+
+     toolchain_args = {
+       if (defined(invoker.toolchain_args)) {
+@@ -472,10 +472,13 @@ template("win_toolchains") {
+   }
+ }
+
+-if (target_cpu == "x86" || target_cpu == "x64") {
++if (target_cpu == "x86") {
+   win_toolchains("x86") {
+     toolchain_arch = "x86"
+   }
++}
++
++if (target_cpu == "x64") {
+   win_toolchains("x64") {
+     toolchain_arch = "x64"
+   }
+--- wee8/build/config/compiler/BUILD.gn
++++ wee8/build/config/compiler/BUILD.gn
+@@ -288,14 +288,21 @@ config("compiler") {
+   # so only enable it if using_clang. See: https://gcc.gnu.org/PR97913
+   # TODO(mpdenton): remove is_clang once GCC bug is fixed.
+   if (!is_nacl && !is_ubsan && is_clang) {
+-    cflags += [ "-fno-delete-null-pointer-checks" ]
++    if (is_win) {
++      cflags += [ "/clang:-fno-delete-null-pointer-checks" ]
++    } else {
++      cflags += [ "-fno-delete-null-pointer-checks" ]
++    }
+   }
+
+   # Don't emit the GCC version ident directives, they just end up in the
+   # .comment section or debug info taking up binary size, and makes comparing
+   # .o files built with different compiler versions harder.
+-  if (!is_win || is_clang) {
++  if (!is_win) {
+     cflags += [ "-fno-ident" ]
++  } else if (is_clang) {
++    # TODO(crbug.com/1183366): Use -fno-ident once clang-cl supports it.
++    cflags += [ "/clang:-fno-ident" ]
+   }
+
+   # In general, Windows is totally different, but all the other builds share
+@@ -1553,6 +1555,13 @@ config("default_warnings") {
+     ]
+   }
+
++  # Disable warnings seen on Windows when using clang-cl.
++  if (is_win && is_clang) {
++    cflags += [
++      "-Wno-invalid-offsetof",
++    ]
++  }
++
+   if (is_clang) {
+     cflags += [
+       # TODO(thakis): Consider -Wloop-analysis (turns on
