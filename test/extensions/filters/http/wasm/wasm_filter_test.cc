@@ -1847,7 +1847,7 @@ TEST_P(WasmHttpFilterTest, PanicOnRequestHeaders) {
   EXPECT_CALL(decoder_callbacks,
               sendLocalReply(Envoy::Http::Code::ServiceUnavailable, testing::Eq(""), _,
                              testing::Eq(Grpc::Status::WellKnownGrpcStatus::Unavailable),
-                             testing::Eq("wasm_fail_stream")));
+                             testing::Eq("wasm_fail_stream"), _));
 
   // Create in-VM context.
   filter().onCreate();
@@ -1869,7 +1869,7 @@ TEST_P(WasmHttpFilterTest, PanicOnRequestBody) {
   EXPECT_CALL(decoder_callbacks,
               sendLocalReply(Envoy::Http::Code::ServiceUnavailable, testing::Eq(""), _,
                              testing::Eq(Grpc::Status::WellKnownGrpcStatus::Unavailable),
-                             testing::Eq("wasm_fail_stream")));
+                             testing::Eq("wasm_fail_stream"), _));
 
   // Create in-VM context.
   filter().onCreate();
@@ -1890,7 +1890,7 @@ TEST_P(WasmHttpFilterTest, PanicOnRequestTrailers) {
   EXPECT_CALL(decoder_callbacks,
               sendLocalReply(Envoy::Http::Code::ServiceUnavailable, testing::Eq(""), _,
                              testing::Eq(Grpc::Status::WellKnownGrpcStatus::Unavailable),
-                             testing::Eq("wasm_fail_stream")));
+                             testing::Eq("wasm_fail_stream"), _));
 
   // Create in-VM context.
   filter().onCreate();
@@ -1908,7 +1908,7 @@ TEST_P(WasmHttpFilterTest, PanicOnResponseHeaders) {
   EXPECT_CALL(encoder_callbacks,
               sendLocalReply(Envoy::Http::Code::ServiceUnavailable, testing::Eq(""), _,
                              testing::Eq(Grpc::Status::WellKnownGrpcStatus::Unavailable),
-                             testing::Eq("wasm_fail_stream")));
+                             testing::Eq("wasm_fail_stream"), _));
 
   // Create in-VM context.
   filter().onCreate();
@@ -1927,7 +1927,7 @@ TEST_P(WasmHttpFilterTest, PanicOnResponseBody) {
   EXPECT_CALL(encoder_callbacks,
               sendLocalReply(Envoy::Http::Code::ServiceUnavailable, testing::Eq(""), _,
                              testing::Eq(Grpc::Status::WellKnownGrpcStatus::Unavailable),
-                             testing::Eq("wasm_fail_stream")));
+                             testing::Eq("wasm_fail_stream"), _));
 
   // Create in-VM context.
   filter().onCreate();
@@ -1945,7 +1945,7 @@ TEST_P(WasmHttpFilterTest, PanicOnResponseTrailers) {
   EXPECT_CALL(encoder_callbacks,
               sendLocalReply(Envoy::Http::Code::ServiceUnavailable, testing::Eq(""), _,
                              testing::Eq(Grpc::Status::WellKnownGrpcStatus::Unavailable),
-                             testing::Eq("wasm_fail_stream")));
+                             testing::Eq("wasm_fail_stream"), _));
 
   // Create in-VM context.
   filter().onCreate();

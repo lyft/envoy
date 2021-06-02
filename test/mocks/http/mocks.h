@@ -226,10 +226,10 @@ public:
   MOCK_METHOD(Network::Socket::OptionsSharedPtr, getUpstreamSocketOptions, (), (const));
 
   // Http::StreamDecoderFilterCallbacks
-  void sendLocalReply_(Code code, absl::string_view body,
-                       std::function<void(ResponseHeaderMap& headers)> modify_headers,
-                       const absl::optional<Grpc::Status::GrpcStatus> grpc_status,
-                       absl::string_view details);
+  void sendLocalReplyMock(Code code, absl::string_view body,
+                          std::function<void(ResponseHeaderMap& headers)> modify_headers,
+                          const absl::optional<Grpc::Status::GrpcStatus> grpc_status,
+                          absl::string_view details, bool retain_http_status_for_grpc = false);
 
   void encode100ContinueHeaders(ResponseHeaderMapPtr&& headers) override {
     encode100ContinueHeaders_(*headers);
@@ -269,7 +269,7 @@ public:
               (Code code, absl::string_view body,
                std::function<void(ResponseHeaderMap& headers)> modify_headers,
                const absl::optional<Grpc::Status::GrpcStatus> grpc_status,
-               absl::string_view details));
+               absl::string_view details, bool retain_http_status_for_grpc));
   MOCK_METHOD(Buffer::BufferMemoryAccountSharedPtr, account, (), (const));
 
   Buffer::InstancePtr buffer_;
@@ -322,7 +322,7 @@ public:
               (Code code, absl::string_view body,
                std::function<void(ResponseHeaderMap& headers)> modify_headers,
                const absl::optional<Grpc::Status::GrpcStatus> grpc_status,
-               absl::string_view details));
+               absl::string_view details, bool retain_http_status_for_grpc));
   MOCK_METHOD(Http1StreamEncoderOptionsOptRef, http1StreamEncoderOptions, ());
 
   Buffer::InstancePtr buffer_;

@@ -534,7 +534,7 @@ TEST_F(OrderingTest, ImmediateResponseOnRequest) {
 
   EXPECT_CALL(stream_delegate_, send(_, false));
   sendRequestHeadersGet(true);
-  EXPECT_CALL(encoder_callbacks_, sendLocalReply(Http::Code::InternalServerError, _, _, _, _));
+  EXPECT_CALL(encoder_callbacks_, sendLocalReply(Http::Code::InternalServerError, _, _, _, _, _));
   sendImmediateResponse500();
   // The rest of the filter isn't necessarily called after this.
 }
@@ -550,7 +550,7 @@ TEST_F(OrderingTest, ImmediateResponseOnResponse) {
 
   EXPECT_CALL(stream_delegate_, send(_, false));
   sendResponseHeaders(true);
-  EXPECT_CALL(encoder_callbacks_, sendLocalReply(Http::Code::InternalServerError, _, _, _, _));
+  EXPECT_CALL(encoder_callbacks_, sendLocalReply(Http::Code::InternalServerError, _, _, _, _, _));
   sendImmediateResponse500();
   Buffer::OwnedImpl resp_body("Hello!");
   EXPECT_EQ(FilterDataStatus::Continue, filter_->encodeData(resp_body, true));
@@ -670,7 +670,7 @@ TEST_F(OrderingTest, ExtraAfterImmediateResponse) {
 
   EXPECT_CALL(stream_delegate_, send(_, false));
   sendRequestHeadersGet(true);
-  EXPECT_CALL(encoder_callbacks_, sendLocalReply(Http::Code::InternalServerError, _, _, _, _));
+  EXPECT_CALL(encoder_callbacks_, sendLocalReply(Http::Code::InternalServerError, _, _, _, _, _));
   sendImmediateResponse500();
   // Extra messages sent after immediate response shouldn't affect anything
   sendRequestHeadersReply();
@@ -688,7 +688,7 @@ TEST_F(OrderingTest, GrpcErrorInline) {
   EXPECT_CALL(*request_timer, enableTimer(kMessageTimeout, nullptr));
   EXPECT_CALL(stream_delegate_, send(_, false));
   sendRequestHeadersGet(true);
-  EXPECT_CALL(encoder_callbacks_, sendLocalReply(Http::Code::InternalServerError, _, _, _, _));
+  EXPECT_CALL(encoder_callbacks_, sendLocalReply(Http::Code::InternalServerError, _, _, _, _, _));
   EXPECT_CALL(*request_timer, enabled()).WillOnce(Return(true));
   EXPECT_CALL(*request_timer, disableTimer());
   sendGrpcError();
@@ -732,7 +732,7 @@ TEST_F(OrderingTest, GrpcErrorOutOfLine) {
   EXPECT_CALL(*request_timer, disableTimer());
   sendRequestHeadersReply();
 
-  EXPECT_CALL(encoder_callbacks_, sendLocalReply(Http::Code::InternalServerError, _, _, _, _));
+  EXPECT_CALL(encoder_callbacks_, sendLocalReply(Http::Code::InternalServerError, _, _, _, _, _));
   EXPECT_CALL(*request_timer, enabled()).WillOnce(Return(false));
   sendGrpcError();
 }
@@ -763,7 +763,7 @@ TEST_F(OrderingTest, GrpcErrorAfterTimeout) {
   EXPECT_CALL(*request_timer, enableTimer(kMessageTimeout, nullptr));
   EXPECT_CALL(stream_delegate_, send(_, false));
   sendRequestHeadersGet(true);
-  EXPECT_CALL(encoder_callbacks_, sendLocalReply(Http::Code::InternalServerError, _, _, _, _));
+  EXPECT_CALL(encoder_callbacks_, sendLocalReply(Http::Code::InternalServerError, _, _, _, _, _));
   request_timer->invokeCallback();
   // Nothing should happen now despite the gRPC error
   sendGrpcError();
@@ -815,7 +815,7 @@ TEST_F(OrderingTest, TimeoutOnResponseBody) {
   EXPECT_EQ(FilterDataStatus::StopIterationNoBuffer, filter_->encodeData(resp_body, true));
 
   // Now, fire the timeout, which will end everything
-  EXPECT_CALL(encoder_callbacks_, sendLocalReply(Http::Code::InternalServerError, _, _, _, _));
+  EXPECT_CALL(encoder_callbacks_, sendLocalReply(Http::Code::InternalServerError, _, _, _, _, _));
   response_timer->invokeCallback();
 }
 
@@ -849,7 +849,7 @@ TEST_F(OrderingTest, TimeoutOnRequestBody) {
   EXPECT_EQ(FilterDataStatus::StopIterationNoBuffer, filter_->decodeData(req_body, true));
 
   // Now fire the timeout and expect a 500 error
-  EXPECT_CALL(encoder_callbacks_, sendLocalReply(Http::Code::InternalServerError, _, _, _, _));
+  EXPECT_CALL(encoder_callbacks_, sendLocalReply(Http::Code::InternalServerError, _, _, _, _, _));
   request_timer->invokeCallback();
 }
 
@@ -857,7 +857,7 @@ TEST_F(OrderingTest, TimeoutOnRequestBody) {
 TEST_F(FastFailOrderingTest, GrpcErrorOnStartRequestHeaders) {
   initialize(absl::nullopt);
   HttpTestUtility::addDefaultHeaders(request_headers_, "GET");
-  EXPECT_CALL(encoder_callbacks_, sendLocalReply(Http::Code::InternalServerError, _, _, _, _));
+  EXPECT_CALL(encoder_callbacks_, sendLocalReply(Http::Code::InternalServerError, _, _, _, _, _));
   EXPECT_EQ(FilterHeadersStatus::StopIteration, filter_->decodeHeaders(request_headers_, true));
 }
 
@@ -883,7 +883,7 @@ TEST_F(FastFailOrderingTest, GrpcErrorOnStartRequestBody) {
   Buffer::OwnedImpl req_body("Hello!");
   Buffer::OwnedImpl buffered_body;
   expectBufferedRequest(buffered_body, false);
-  EXPECT_CALL(encoder_callbacks_, sendLocalReply(Http::Code::InternalServerError, _, _, _, _));
+  EXPECT_CALL(encoder_callbacks_, sendLocalReply(Http::Code::InternalServerError, _, _, _, _, _));
   EXPECT_EQ(FilterDataStatus::StopIterationNoBuffer, filter_->decodeData(req_body, true));
 }
 
@@ -916,7 +916,7 @@ TEST_F(FastFailOrderingTest, GrpcErrorOnStartResponseHeaders) {
 
   sendRequestHeadersGet(false);
   response_headers_.setStatus(200);
-  EXPECT_CALL(encoder_callbacks_, sendLocalReply(Http::Code::InternalServerError, _, _, _, _));
+  EXPECT_CALL(encoder_callbacks_, sendLocalReply(Http::Code::InternalServerError, _, _, _, _, _));
   EXPECT_EQ(FilterHeadersStatus::StopIteration, filter_->encodeHeaders(response_headers_, false));
 }
 
@@ -950,7 +950,7 @@ TEST_F(FastFailOrderingTest, GrpcErrorOnStartResponseBody) {
   Buffer::OwnedImpl resp_body("Hello!");
   Buffer::OwnedImpl resp_buf;
   expectBufferedResponse(resp_buf, false);
-  EXPECT_CALL(encoder_callbacks_, sendLocalReply(Http::Code::InternalServerError, _, _, _, _));
+  EXPECT_CALL(encoder_callbacks_, sendLocalReply(Http::Code::InternalServerError, _, _, _, _, _));
   EXPECT_EQ(FilterDataStatus::StopIterationNoBuffer, filter_->encodeData(resp_body, true));
 }
 
@@ -987,7 +987,7 @@ TEST_F(FastFailOrderingTest, GrpcErrorOnStartResponseTrailers) {
   Buffer::OwnedImpl resp_buf;
   expectBufferedResponse(resp_buf, false);
   EXPECT_EQ(FilterDataStatus::Continue, filter_->encodeData(resp_body, false));
-  EXPECT_CALL(encoder_callbacks_, sendLocalReply(Http::Code::InternalServerError, _, _, _, _));
+  EXPECT_CALL(encoder_callbacks_, sendLocalReply(Http::Code::InternalServerError, _, _, _, _, _));
   EXPECT_EQ(FilterTrailersStatus::StopIteration, filter_->encodeTrailers(response_trailers_));
 }
 
@@ -1022,7 +1022,7 @@ TEST_F(FastFailOrderingTest, GrpcErrorOnStartAddResponseTrailers) {
   sendRequestHeadersGet(false);
   sendResponseHeaders(false);
   Buffer::OwnedImpl resp_body("Hello!");
-  EXPECT_CALL(encoder_callbacks_, sendLocalReply(Http::Code::InternalServerError, _, _, _, _));
+  EXPECT_CALL(encoder_callbacks_, sendLocalReply(Http::Code::InternalServerError, _, _, _, _, _));
   Http::TestResponseTrailerMapImpl response_trailers;
   EXPECT_CALL(encoder_callbacks_, addEncodedTrailers()).WillOnce(ReturnRef(response_trailers));
   EXPECT_EQ(FilterDataStatus::StopIterationNoBuffer, filter_->encodeData(resp_body, true));

@@ -329,6 +329,9 @@ struct LocalReplyData {
   const absl::optional<Grpc::Status::GrpcStatus> grpc_status_;
   // Tells if this is a response to a HEAD request.
   bool is_head_request_ = false;
+  // If is_grpc_ and retain_http_status_for_grpc_ is set, then the HTTP status
+  // code will be response_code_ instead of the gRPC standard 200.
+  bool retain_http_status_for_grpc = false;
 };
 
 /**

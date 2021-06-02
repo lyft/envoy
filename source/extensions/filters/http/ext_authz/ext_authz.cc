@@ -320,7 +320,7 @@ void Filter::onComplete(Filters::Common::ExtAuthz::ResponsePtr&& response) {
             response_headers.addCopy(header.first, header.second);
           }
         },
-        absl::nullopt, RcDetails::get().AuthzDenied);
+        absl::nullopt, RcDetails::get().AuthzDenied, config_->retainHttpStatusOnGrpcDeny());
     decoder_callbacks_->streamInfo().setResponseFlag(
         StreamInfo::ResponseFlag::UnauthorizedExternalService);
     break;

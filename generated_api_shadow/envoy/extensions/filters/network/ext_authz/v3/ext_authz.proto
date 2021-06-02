@@ -24,7 +24,7 @@ option (udpa.annotations.file_status).package_version_status = ACTIVE;
 // gRPC Authorization API defined by
 // :ref:`CheckRequest <envoy_v3_api_msg_service.auth.v3.CheckRequest>`.
 // A failed check will cause this filter to close the TCP connection.
-// [#next-free-field: 7]
+// [#next-free-field: 8]
 message ExtAuthz {
   option (udpa.annotations.versioning).previous_message_type =
       "envoy.config.filter.network.ext_authz.v2.ExtAuthz";
@@ -56,4 +56,14 @@ message ExtAuthz {
   // Specifies if the filter is enabled with metadata matcher.
   // If this field is not specified, the filter will be enabled for all requests.
   type.matcher.v3.MetadataMatcher filter_enabled_metadata = 6;
+
+  // Specifies whether HTTP status codes for gRPC calls are passed intact from
+  // the called ext_authz service back to the caller on gRPC DENIED.
+  //
+  // When this field is true, Envoy's HTTP response to gRPC calls which receive
+  // a DENIED response will retain the status code from the called service's
+  // HTTP headers. For example: if true the 'Permission Denied' message for a
+  // call rejected by OPA policy would have an HTTP 403 status rather than
+  // the gRPC default of 200.
+  bool retain_http_status_on_grpc_deny = 7;
 }

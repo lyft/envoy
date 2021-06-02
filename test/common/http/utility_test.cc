@@ -662,6 +662,60 @@ TEST(HttpUtility, SendLocalGrpcReply) {
       Utility::LocalReplyData{true, Http::Code::PayloadTooLarge, "large", absl::nullopt, false});
 }
 
+TEST(HttpUtility, SendLocalGrpcReplyPropagateResponseTrue) {
+  MockStreamDecoderFilterCallbacks callbacks;
+  bool is_reset = false;
+
+  auto encode_functions = Utility::EncodeFunctions{
+      [&](ResponseHeaderMap& headers) -> void {
+        headers.setGrpcStatus(Grpc::Status::WellKnownGrpcStatus::PermissionDenied);
+      },
+      nullptr,
+      [&](ResponseHeaderMapPtr&& headers, bool end_stream) -> void {
+        callbacks.encodeHeaders(std::move(headers), end_stream, "");
+      },
+      nullptr};
+
+  EXPECT_CALL(callbacks, encodeHeaders_(_, true))
+      .WillOnce(Invoke([&](const ResponseHeaderMap& headers, bool) -> void {
+        EXPECT_EQ(headers.getStatusValue(), "403");
+        EXPECT_EQ(headers.getGrpcStatusValue(),
+                  std::to_string(enumToInt(Grpc::Status::WellKnownGrpcStatus::PermissionDenied)));
+        EXPECT_NE(headers.GrpcMessage(), nullptr);
+        EXPECT_EQ(headers.getGrpcMessageValue(), "large");
+      }));
+  Utility::sendLocalReply(
+      is_reset, encode_functions,
+      Utility::LocalReplyData{true, Http::Code::Forbidden, "large", absl::nullopt, false, true});
+}
+
+TEST(HttpUtility, SendLocalGrpcReplyPropagateResponseFalse) {
+  MockStreamDecoderFilterCallbacks callbacks;
+  bool is_reset = false;
+
+  auto encode_functions = Utility::EncodeFunctions{
+      [&](ResponseHeaderMap& headers) -> void {
+        headers.setGrpcStatus(Grpc::Status::WellKnownGrpcStatus::PermissionDenied);
+      },
+      nullptr,
+      [&](ResponseHeaderMapPtr&& headers, bool end_stream) -> void {
+        callbacks.encodeHeaders(std::move(headers), end_stream, "");
+      },
+      nullptr};
+
+  EXPECT_CALL(callbacks, encodeHeaders_(_, true))
+      .WillOnce(Invoke([&](const ResponseHeaderMap& headers, bool) -> void {
+        EXPECT_EQ(headers.getStatusValue(), "200");
+        EXPECT_EQ(headers.getGrpcStatusValue(),
+                  std::to_string(enumToInt(Grpc::Status::WellKnownGrpcStatus::PermissionDenied)));
+        EXPECT_NE(headers.GrpcMessage(), nullptr);
+        EXPECT_EQ(headers.getGrpcMessageValue(), "large");
+      }));
+  Utility::sendLocalReply(
+      is_reset, encode_functions,
+      Utility::LocalReplyData{true, Http::Code::Forbidden, "large", absl::nullopt, false, false});
+}
+
 TEST(HttpUtility, SendLocalGrpcReplyGrpcStatusAlreadyExists) {
   MockStreamDecoderFilterCallbacks callbacks;
   bool is_reset = false;
