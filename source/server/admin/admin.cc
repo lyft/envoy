@@ -249,8 +249,8 @@ void AdminImpl::createFilterChain(Http::FilterChainFactoryCallbacks& callbacks) 
 }
 
 Http::Code AdminImpl::runCallback(absl::string_view path_and_query,
-                                  Http::ResponseHeaderMap& response_headers,
-                                  Buffer::Instance& response, AdminStream& admin_stream) {
+                                  Http::ResponseHeaderMap& response_headers, Chunker& response,
+                                  AdminStream& admin_stream) {
 
   Http::Code code = Http::Code::OK;
   bool found_handler = false;
@@ -301,8 +301,8 @@ std::vector<const AdminImpl::UrlHandler*> AdminImpl::sortedHandlers() const {
   return sorted_handlers;
 }
 
-Http::Code AdminImpl::handlerHelp(absl::string_view, Http::ResponseHeaderMap&,
-                                  Buffer::Instance& response, AdminStream&) {
+Http::Code AdminImpl::handlerHelp(absl::string_view, Http::ResponseHeaderMap&, Chunker& response,
+                                  AdminStream&) {
   response.add("admin commands are:\n");
 
   // Prefix order is used during searching, but for printing do them in alpha order.
@@ -313,7 +313,7 @@ Http::Code AdminImpl::handlerHelp(absl::string_view, Http::ResponseHeaderMap&,
 }
 
 Http::Code AdminImpl::handlerAdminHome(absl::string_view, Http::ResponseHeaderMap& response_headers,
-                                       Buffer::Instance& response, AdminStream&) {
+                                       Chunker& response, AdminStream&) {
   response_headers.setReferenceContentType(Http::Headers::get().ContentTypeValues.Html);
 
   response.add(absl::StrReplaceAll(AdminHtmlStart, {{"@FAVICON@", EnvoyFavicon}}));

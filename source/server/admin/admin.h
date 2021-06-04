@@ -73,7 +73,7 @@ public:
   AdminImpl(const std::string& profile_path, Server::Instance& server);
 
   Http::Code runCallback(absl::string_view path_and_query,
-                         Http::ResponseHeaderMap& response_headers, Buffer::Instance& response,
+                         Http::ResponseHeaderMap& response_headers, Chunker& response,
                          AdminStream& admin_stream);
   const Network::Socket& socket() override { return *socket_; }
   Network::Socket& mutableSocket() { return *socket_; }
@@ -202,7 +202,7 @@ public:
 
   AdminFilter::AdminServerCallbackFunction createCallbackFunction() {
     return [this](absl::string_view path_and_query, Http::ResponseHeaderMap& response_headers,
-                  Buffer::OwnedImpl& response, AdminFilter& filter) -> Http::Code {
+                  Chunker& response, AdminFilter& filter) -> Http::Code {
       return runCallback(path_and_query, response_headers, response, filter);
     };
   }
@@ -305,11 +305,11 @@ private:
    * URL handlers.
    */
   Http::Code handlerAdminHome(absl::string_view path_and_query,
-                              Http::ResponseHeaderMap& response_headers, Buffer::Instance& response,
+                              Http::ResponseHeaderMap& response_headers, Chunker& response,
                               AdminStream&);
 
   Http::Code handlerHelp(absl::string_view path_and_query,
-                         Http::ResponseHeaderMap& response_headers, Buffer::Instance& response,
+                         Http::ResponseHeaderMap& response_headers, Chunker& response,
                          AdminStream&);
 
   class AdminListenSocketFactory : public Network::ListenSocketFactory {

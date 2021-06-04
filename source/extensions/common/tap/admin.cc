@@ -42,7 +42,7 @@ AdminHandler::~AdminHandler() {
   ASSERT(rc);
 }
 
-Http::Code AdminHandler::handler(absl::string_view, Http::HeaderMap&, Buffer::Instance& response,
+Http::Code AdminHandler::handler(absl::string_view, Http::HeaderMap&, Server::Chunker& response,
                                  Server::AdminStream& admin_stream) {
   if (attached_request_.has_value()) {
     // TODO(mattlklein123): Consider supporting concurrent admin /tap streams. Right now we support
@@ -85,7 +85,7 @@ Http::Code AdminHandler::handler(absl::string_view, Http::HeaderMap&, Buffer::In
   return Http::Code::OK;
 }
 
-Http::Code AdminHandler::badRequest(Buffer::Instance& response, absl::string_view error) {
+Http::Code AdminHandler::badRequest(Server::Chunker& response, absl::string_view error) {
   ENVOY_LOG(debug, "handler bad request: {}", error);
   response.add(error);
   return Http::Code::BadRequest;

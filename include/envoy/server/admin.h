@@ -57,6 +57,8 @@ public:
   virtual Http::Http1StreamEncoderOptionsOptRef http1StreamEncoderOptions() PURE;
 };
 
+using Chunker = Buffer::Instance;
+
 /**
  * This macro is used to add handlers to the Admin HTTP Endpoint. It builds
  * a callback that executes X when the specified admin handler is hit. This macro can be
@@ -65,7 +67,7 @@ public:
  */
 #define MAKE_ADMIN_HANDLER(X)                                                                      \
   [this](absl::string_view path_and_query, Http::ResponseHeaderMap& response_headers,              \
-         Buffer::Instance& data, Server::AdminStream& admin_stream) -> Http::Code {                \
+         Server::Chunker& data, Server::AdminStream& admin_stream) -> Http::Code {                 \
     return X(path_and_query, response_headers, data, admin_stream);                                \
   }
 
@@ -86,9 +88,9 @@ public:
    * its data.
    * @return Http::Code the response code.
    */
-  using HandlerCb = std::function<Http::Code(
-      absl::string_view path_and_query, Http::ResponseHeaderMap& response_headers,
-      Buffer::Instance& response, AdminStream& admin_stream)>;
+  using HandlerCb = std::function<Http::Code(absl::string_view path_and_query,
+                                             Http::ResponseHeaderMap& response_headers,
+                                             Chunker& response, AdminStream& admin_stream)>;
 
   /**
    * Add an admin handler.

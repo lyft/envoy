@@ -18,7 +18,7 @@ RuntimeHandler::RuntimeHandler(Server::Instance& server) : HandlerContextBase(se
 
 Http::Code RuntimeHandler::handlerRuntime(absl::string_view url,
                                           Http::ResponseHeaderMap& response_headers,
-                                          Buffer::Instance& response, AdminStream&) {
+                                          Chunker& response, AdminStream&) {
   const Http::Utility::QueryParams params = Http::Utility::parseAndDecodeQueryString(url);
   response_headers.setReferenceContentType(Http::Headers::get().ContentTypeValues.Json);
 
@@ -79,8 +79,7 @@ Http::Code RuntimeHandler::handlerRuntime(absl::string_view url,
 }
 
 Http::Code RuntimeHandler::handlerRuntimeModify(absl::string_view url, Http::ResponseHeaderMap&,
-                                                Buffer::Instance& response,
-                                                AdminStream& admin_stream) {
+                                                Chunker& response, AdminStream& admin_stream) {
   Http::Utility::QueryParams params = Http::Utility::parseAndDecodeQueryString(url);
   if (params.empty()) {
     // Check if the params are in the request's body.
