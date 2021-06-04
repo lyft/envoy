@@ -13,6 +13,7 @@
 #include "common/config/protobuf_link_hacks.h"
 #include "common/config/utility.h"
 #include "common/singleton/manager_impl.h"
+#include "common/stats/thread_local_store.h"
 #include "common/upstream/eds.h"
 
 #include "server/transport_socket_config_impl.h"
@@ -94,8 +95,6 @@ public:
   // they are loaded as expected.
   void priorityAndLocalityWeightedHelper(bool ignore_unknown_dynamic_fields, size_t num_hosts,
                                          bool healthy) {
-    state_.PauseTiming();
-
     envoy::config::endpoint::v3::ClusterLoadAssignment cluster_load_assignment;
     cluster_load_assignment.set_cluster_name("fare");
 
@@ -138,6 +137,7 @@ public:
     }
     state_.ResumeTiming();
     grpc_mux_->grpcStreamForTest().onReceiveMessage(std::move(response));
+    state_.PauseTiming();
     ASSERT(cluster_->prioritySet().hostSetsPerPriority()[1]->hostsPerLocality().get()[0].size() ==
            num_hosts);
   }
@@ -148,7 +148,9 @@ public:
   const std::string type_url_;
   uint64_t version_{};
   bool initialized_{};
-  Stats::TestUtil::TestStore stats_;
+  Stats::TestSymbolTable symbol_table_{};
+  Stats::AllocatorImpl stats_allocator_{*symbol_table_};
+  Stats::ThreadLocalStoreImpl stats_{stats_allocator_};
   Config::SubscriptionStats subscription_stats_;
   Ssl::MockContextManager ssl_context_manager_;
   envoy::config::cluster::v3::Cluster eds_cluster_;
@@ -177,49 +179,45 @@ public:
 } // namespace Envoy
 
 static void priorityAndLocalityWeighted(State& state) {
-  Envoy::Thread::MutexBasicLockable lock;
-  Envoy::Logger::Context logging_state(spdlog::level::warn,
-                                       Envoy::Logger::Logger::DEFAULT_LOG_FORMAT, lock, false);
-  for (auto _ : state) {
-    Envoy::Upstream::EdsSpeedTest speed_test(state, state.range(0));
-    // if we've been instructed to skip tests, only run once no matter the argument:
-    uint32_t endpoints = skipExpensiveBenchmarks() ? 1 : state.range(2);
+  Envoy::Upstream::EdsSpeedTest speed_test(state, state.range(0));
+  // if we've been instructed to skip tests, only run once no matter the argument:
+  const uint32_t num_endpoints = skipExpensiveBenchmarks() ? 1 : state.range(2);
+  for (auto _ : state) { // NOLINT(clang-analyzer-deadcode.DeadStores)
+    state.PauseTiming();
 
-    speed_test.priorityAndLocalityWeightedHelper(state.range(1), endpoints, true);
+    speed_test.priorityAndLocalityWeightedHelper(state.range(1), num_endpoints, true);
+    state.ResumeTiming();
   }
 }
 
 BENCHMARK(priorityAndLocalityWeighted)
-    ->Ranges({{false, true}, {false, true}, {1, 100000}})
+    ->Ranges({{false, true}, {false, true}, {64, 100000}})
     ->Unit(benchmark::kMillisecond);
 
 static void duplicateUpdate(State& state) {
-  Envoy::Thread::MutexBasicLockable lock;
-  Envoy::Logger::Context logging_state(spdlog::level::warn,
-                                       Envoy::Logger::Logger::DEFAULT_LOG_FORMAT, lock, false);
+  Envoy::Upstream::EdsSpeedTest speed_test(state, false);
+  const uint32_t num_endpoints = skipExpensiveBenchmarks() ? 1 : state.range(0);
+  for (auto _ : state) { // NOLINT(clang-analyzer-deadcode.DeadStores)
+    state.PauseTiming();
 
-  for (auto _ : state) {
-    Envoy::Upstream::EdsSpeedTest speed_test(state, false);
-    uint32_t endpoints = skipExpensiveBenchmarks() ? 1 : state.range(0);
-
-    speed_test.priorityAndLocalityWeightedHelper(true, endpoints, true);
-    speed_test.priorityAndLocalityWeightedHelper(true, endpoints, true);
+    speed_test.priorityAndLocalityWeightedHelper(true, num_endpoints, true);
+    speed_test.priorityAndLocalityWeightedHelper(true, num_endpoints, true);
+    state.ResumeTiming();
   }
 }
 
-BENCHMARK(duplicateUpdate)->Range(1, 100000)->Unit(benchmark::kMillisecond);
+BENCHMARK(duplicateUpdate)->Range(64, 100000)->Unit(benchmark::kMillisecond);
 
 static void healthOnlyUpdate(State& state) {
-  Envoy::Thread::MutexBasicLockable lock;
-  Envoy::Logger::Context logging_state(spdlog::level::warn,
-                                       Envoy::Logger::Logger::DEFAULT_LOG_FORMAT, lock, false);
-  for (auto _ : state) {
-    Envoy::Upstream::EdsSpeedTest speed_test(state, false);
-    uint32_t endpoints = skipExpensiveBenchmarks() ? 1 : state.range(0);
+  Envoy::Upstream::EdsSpeedTest speed_test(state, false);
+  const uint32_t num_endpoints = skipExpensiveBenchmarks() ? 1 : state.range(0);
+  for (auto _ : state) { // NOLINT(clang-analyzer-deadcode.DeadStores)
+    state.PauseTiming();
 
-    speed_test.priorityAndLocalityWeightedHelper(true, endpoints, true);
-    speed_test.priorityAndLocalityWeightedHelper(true, endpoints, false);
+    speed_test.priorityAndLocalityWeightedHelper(true, num_endpoints, true);
+    speed_test.priorityAndLocalityWeightedHelper(true, num_endpoints, false);
+    state.ResumeTiming();
   }
 }
 
-BENCHMARK(healthOnlyUpdate)->Range(1, 100000)->Unit(benchmark::kMillisecond);
+BENCHMARK(healthOnlyUpdate)->Range(64, 100000)->Unit(benchmark::kMillisecond);
