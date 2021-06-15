@@ -118,7 +118,8 @@ OriginalDstCluster::OriginalDstCluster(
       use_http_header_(info_->lbOriginalDstConfig()
                            ? info_->lbOriginalDstConfig().value().use_http_header()
                            : false),
-      host_map_(std::make_shared<HostMap>()) {
+      host_map_(std::make_shared<HostMap>()),
+      time_source_(factory_context.dispatcher().timeSource()) {
   // TODO(dio): Remove hosts check once the hosts field is removed.
   if (config.has_load_assignment() || !config.hidden_envoy_deprecated_hosts().empty()) {
     throw EnvoyException("ORIGINAL_DST clusters must have no load assignment or hosts configured");
@@ -192,6 +193,10 @@ OriginalDstClusterFactory::createClusterImpl(
         "'ORIGINAL_DST_LB' is allowed with cluster type 'ORIGINAL_DST'",
         envoy::config::cluster::v3::Cluster::LbPolicy_Name(cluster.lb_policy()),
         envoy::config::cluster::v3::Cluster::DiscoveryType_Name(cluster.type())));
+  }
+
+  if (cluster.has_common_lb_config() && cluster.common_lb_config().has_slow_start_config()) {
+    throw EnvoyException("Slow start mode is not supported for original dst lb");
   }
 
   // TODO(mattklein123): The original DST load balancer type should be deprecated and instead

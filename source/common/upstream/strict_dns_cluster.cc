@@ -22,7 +22,8 @@ StrictDnsClusterImpl::StrictDnsClusterImpl(
       local_info_(factory_context.localInfo()), dns_resolver_(dns_resolver),
       dns_refresh_rate_ms_(
           std::chrono::milliseconds(PROTOBUF_GET_MS_OR_DEFAULT(cluster, dns_refresh_rate, 5000))),
-      respect_dns_ttl_(cluster.respect_dns_ttl()) {
+      respect_dns_ttl_(cluster.respect_dns_ttl()),
+      time_source_(factory_context.dispatcher().timeSource()) {
   failure_backoff_strategy_ =
       Config::Utility::prepareDnsRefreshStrategy<envoy::config::cluster::v3::Cluster>(
           cluster, dns_refresh_rate_ms_.count(), factory_context.api().randomGenerator());

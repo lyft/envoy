@@ -283,6 +283,8 @@ private:
   const std::string cluster_name_;
   const Common::Redis::ClusterRefreshManagerSharedPtr refresh_manager_;
   const Common::Redis::ClusterRefreshManager::HandlePtr registration_handle_;
+
+  TimeSource& time_source_;
 };
 
 class RedisClusterFactory : public Upstream::ConfigurableClusterFactoryBase<

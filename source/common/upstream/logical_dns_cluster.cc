@@ -60,7 +60,8 @@ LogicalDnsCluster::LogicalDnsCluster(
       load_assignment_(
           cluster.has_load_assignment()
               ? convertPriority(cluster.load_assignment())
-              : Config::Utility::translateClusterHosts(cluster.hidden_envoy_deprecated_hosts())) {
+              : Config::Utility::translateClusterHosts(cluster.hidden_envoy_deprecated_hosts())),
+      time_source_(factory_context.dispatcher().timeSource()) {
   failure_backoff_strategy_ =
       Config::Utility::prepareDnsRefreshStrategy<envoy::config::cluster::v3::Cluster>(
           cluster, dns_refresh_rate_ms_.count(), factory_context.api().randomGenerator());
