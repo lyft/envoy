@@ -1,15 +1,26 @@
 #include "source/extensions/common/aws/utility.h"
 
+#include "source/common/common/empty_string.h"
 #include "source/common/common/fmt.h"
 #include "source/common/common/utility.h"
 
+#include "absl/strings/match.h"
 #include "absl/strings/str_join.h"
+#include "absl/strings/str_split.h"
 #include "curl/curl.h"
 
 namespace Envoy {
 namespace Extensions {
 namespace Common {
 namespace Aws {
+
+static constexpr absl::string_view PATH_SPLITTER = "/";
+static constexpr absl::string_view QUERY_PARAM_SEPERATOR = "=";
+static constexpr absl::string_view QUERY_SEPERATOR = "&";
+static constexpr absl::string_view QUERY_SPLITTER = "?";
+static constexpr absl::string_view S3_SERVICE_NAME = "s3";
+static const std::string URI_ENCODE = "%{:02X}";
+static const std::string URI_DOUBLE_ENCODE = "%25{:02X}";
 
 std::map<std::string, std::string>
 Utility::canonicalizeHeaders(const Http::RequestHeaderMap& headers) {
@@ -58,18 +69,22 @@ Utility::canonicalizeHeaders(const Http::RequestHeaderMap& headers) {
   return out;
 }
 
-std::string
-Utility::createCanonicalRequest(absl::string_view method, absl::string_view path,
-                                const std::map<std::string, std::string>& canonical_headers,
-                                absl::string_view content_hash) {
+std::string Utility::createCanonicalRequest(
+    absl::string_view service_name, absl::string_view method, absl::string_view path,
+    const std::map<std::string, std::string>& canonical_headers, absl::string_view content_hash) {
   std::vector<absl::string_view> parts;
   parts.emplace_back(method);
   // don't include the query part of the path
-  const auto path_part = StringUtil::cropRight(path, "?");
-  parts.emplace_back(path_part.empty() ? "/" : path_part);
-  const auto query_part = StringUtil::cropLeft(path, "?");
+  const auto path_part = StringUtil::cropRight(path, QUERY_SPLITTER);
+  const auto canonicalized_path = path_part.empty()
+                                      ? std::string{PATH_SPLITTER}
+                                      : canonicalizePathString(path_part, service_name);
+  parts.emplace_back(canonicalized_path);
+  const auto query_part = StringUtil::cropLeft(path, QUERY_SPLITTER);
   // if query_part == path_part, then there is no query
-  parts.emplace_back(query_part == path_part ? "" : query_part);
+  const auto canonicalized_query =
+      query_part == path_part ? EMPTY_STRING : Utility::canonicalizeQueryString(query_part);
+  parts.emplace_back(absl::string_view(canonicalized_query));
   std::vector<std::string> formatted_headers;
   formatted_headers.reserve(canonical_headers.size());
   for (const auto& header : canonical_headers) {
@@ -77,11 +92,103 @@ Utility::createCanonicalRequest(absl::string_view method, absl::string_view path
     parts.emplace_back(formatted_headers.back());
   }
   // need an extra blank space after the canonical headers
-  parts.emplace_back("");
+  parts.emplace_back(EMPTY_STRING);
   const auto signed_headers = Utility::joinCanonicalHeaderNames(canonical_headers);
   parts.emplace_back(signed_headers);
   parts.emplace_back(content_hash);
   return absl::StrJoin(parts, "\n");
+}
+
+/**
+ * Normalizes the path string based on AWS requirements.
+ * See step 2 in https://docs.aws.amazon.com/general/latest/gr/sigv4-create-canonical-request.html
+ */
+std::string Utility::canonicalizePathString(absl::string_view path_string,
+                                            absl::string_view service_name) {
+  // If service is S3, do not normalize but only encode the path
+  if (absl::EqualsIgnoreCase(service_name, S3_SERVICE_NAME)) {
+    return encodePathSegment(path_string, service_name);
+  }
+  // If service is not S3, normalize and encode the path
+  const auto path_segments = StringUtil::splitToken(path_string, std::string{PATH_SPLITTER});
+  std::vector<std::string> path_list;
+  for (const auto& path_segment : path_segments) {
+    if (path_segment.empty()) {
+      continue;
+    }
+    path_list.emplace_back(encodePathSegment(path_segment, service_name));
+  }
+  auto canonical_path_string =
+      fmt::format("{}{}", PATH_SPLITTER, absl::StrJoin(path_list, PATH_SPLITTER));
+  // Handle corner case when path ends with '/'
+  if (absl::EndsWith(path_string, PATH_SPLITTER) && canonical_path_string.size() > 1) {
+    canonical_path_string.push_back(PATH_SPLITTER[0]);
+  }
+  return canonical_path_string;
+}
+
+std::string Utility::encodePathSegment(absl::string_view decoded, absl::string_view service_name) {
+  std::string encoded;
+  for (char c : decoded) {
+    if (std::isalnum(c) || c == '-' || c == '.' || c == '_' || c == '~') {
+      // Escape unreserved chars from RFC 3986
+      encoded.push_back(c);
+    } else if (absl::EqualsIgnoreCase(service_name, S3_SERVICE_NAME)) {
+      // Do not encode '/' for S3
+      if (c == PATH_SPLITTER[0]) {
+        encoded.push_back(c);
+      } else {
+        // S3 path should be single encoded
+        absl::StrAppend(&encoded, fmt::format(URI_ENCODE, c));
+      }
+    } else {
+      // All other services' path should be double encoded
+      absl::StrAppend(&encoded, fmt::format(URI_DOUBLE_ENCODE, c));
+    }
+  }
+  return encoded;
+}
+
+/**
+ * Normalizes the query string based on AWS requirements.
+ * See step 3 in https://docs.aws.amazon.com/general/latest/gr/sigv4-create-canonical-request.html
+ */
+std::string Utility::canonicalizeQueryString(absl::string_view query_string) {
+  // Sort query string based on param name and append "=" if value is missing
+  const auto query_fragments = StringUtil::splitToken(query_string, QUERY_SEPERATOR);
+  std::vector<std::pair<std::string, std::string>> query_list;
+  for (const auto& query_fragment : query_fragments) {
+    // Only split at the first "=" and encode the rest
+    const std::vector<std::string> query =
+        absl::StrSplit(query_fragment, absl::MaxSplits(QUERY_PARAM_SEPERATOR, 1));
+    if (!query.empty()) {
+      query_list.emplace_back(std::make_pair(query[0], query.size() > 1 ? query[1] : EMPTY_STRING));
+    }
+  }
+  // Sort query params by name and value
+  std::sort(query_list.begin(), query_list.end());
+  // Encode query params name and value separately
+  for (auto& query : query_list) {
+    query = std::make_pair(Utility::encodeQueryParam(query.first),
+                           Utility::encodeQueryParam(query.second));
+  }
+  return absl::StrJoin(query_list, QUERY_SEPERATOR, absl::PairFormatter(QUERY_PARAM_SEPERATOR));
+}
+
+std::string Utility::encodeQueryParam(absl::string_view decoded) {
+  std::string encoded;
+  for (char c : decoded) {
+    if (std::isalnum(c) || c == '-' || c == '.' || c == '_' || c == '~') {
+      // Escape unreserved chars from RFC 3986
+      encoded.push_back(c);
+    } else if (c == QUERY_PARAM_SEPERATOR[0]) {
+      // Double encode the "="
+      absl::StrAppend(&encoded, fmt::format(URI_DOUBLE_ENCODE, c));
+    } else {
+      absl::StrAppend(&encoded, fmt::format(URI_ENCODE, c));
+    }
+  }
+  return encoded;
 }
 
 std::string
