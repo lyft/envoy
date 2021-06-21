@@ -8,10 +8,10 @@ namespace Envoy {
 namespace Http {
 namespace Http1 {
 
-class LegacyHttpParserImpl : public Parser {
+class HttpParserImpl : public Parser {
 public:
-  LegacyHttpParserImpl(MessageType type, ParserCallbacks* data);
-  ~LegacyHttpParserImpl() override;
+  HttpParserImpl(MessageType type, ParserCallbacks* data);
+  ~HttpParserImpl() override;
 
   // Http1::Parser
   RcVal execute(const char* data, int len) override;
@@ -23,7 +23,7 @@ public:
   int httpMajor() const override;
   int httpMinor() const override;
   absl::optional<uint64_t> contentLength() const override;
-  void setHasContentLength(bool) override{};
+  void setHasContentLength(bool val) override;
   bool isChunked() const override;
   absl::string_view methodName() const override;
   absl::string_view errnoName(int rc) const override;
@@ -31,6 +31,9 @@ public:
   int statusToInt(const ParserStatus code) const override;
 
 private:
+  // TODO(5155): This secondary layer with a private class can be removed after http-parser is
+  // removed. This layer avoids colliding symbols between the two libraries by isolating the
+  // libraries in separate compilation units.
   class Impl;
   std::unique_ptr<Impl> impl_;
 };

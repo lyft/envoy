@@ -490,6 +490,18 @@ REPOSITORY_LOCATIONS_SPEC = dict(
         release_date = "2020-07-10",
         cpe = "cpe:2.3:a:nodejs:node.js:*",
     ),
+    com_github_nodejs_llhttp = dict(
+        project_name = "llhttp",
+        project_desc = "Parser for HTTP messages written in C",
+        project_url = "https://github.com/nodejs/llhttp",
+        version = "6.0.3",
+        sha256 = "ef50b15176f417287bca34e5f16c76f4e751e6e842738ddb339b9765be835132",
+        strip_prefix = "llhttp-release-v{version}",
+        urls = ["https://github.com/nodejs/llhttp/archive/release/v{version}.tar.gz"],
+        use_category = ["dataplane_core"],
+        release_date = "2021-06-13",
+        cpe = "cpe:2.3:a:nodejs:node.js:*",
+    ),
     com_github_alibaba_hessian2_codec = dict(
         project_name = "hessian2-codec",
         project_desc = "hessian2-codec is a C++ library for hessian2 codec",

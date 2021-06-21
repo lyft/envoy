@@ -21,6 +21,7 @@
 #include "source/common/http/headers.h"
 #include "source/common/http/http1/header_formatter.h"
 #include "source/common/http/http1/legacy_parser_impl.h"
+#include "source/common/http/http1/parser_impl.h"
 #include "source/common/http/utility.h"
 #include "source/common/runtime/runtime_features.h"
 
@@ -475,7 +476,11 @@ ConnectionImpl::ConnectionImpl(Network::Connection& connection, CodecStats& stat
           []() -> void { /* TODO(adisuissa): Handle overflow watermark */ })),
       max_headers_kb_(max_headers_kb), max_headers_count_(max_headers_count) {
   output_buffer_->setWatermarks(connection.bufferLimit());
-  parser_ = std::make_unique<LegacyHttpParserImpl>(type, this);
+  if (Runtime::runtimeFeatureEnabled("envoy.reloadable_features.enable_new_http1_parser")) {
+    parser_ = std::make_unique<HttpParserImpl>(type, this);
+  } else {
+    parser_ = std::make_unique<LegacyHttpParserImpl>(type, this);
+  }
 }
 
 Status ConnectionImpl::completeLastHeader() {
@@ -593,10 +598,10 @@ Http::Status ConnectionImpl::dispatch(Buffer::Instance& data) {
       }
 
       total_parsed += statusor_parsed.value();
-      if (parser_->getStatus() != ParserStatus::Success) {
+      if (!parser_->isOk()) {
         // Parse errors trigger an exception in dispatchSlice so we are guaranteed to be paused at
         // this point.
-        ASSERT(parser_->getStatus() == ParserStatus::Paused);
+        ASSERT(parser_->isPaused());
         break;
       }
     }
@@ -668,6 +673,8 @@ Status ConnectionImpl::onHeaderValue(const char* data, size_t length) {
   }
 
   absl::string_view header_value{data, length};
+  // TODO(5155): This can be removed when http_parser is removed. llhttp enables strict validation
+  // of HTTP header values.
   if (!Http::HeaderUtility::headerValueIsValid(header_value)) {
     ENVOY_CONN_LOG(debug, "invalid header value: {}", connection_, header_value);
     error_code_ = Http::Code::BadRequest;
@@ -776,6 +783,7 @@ StatusOr<ParserStatus> ConnectionImpl::onHeadersComplete() {
       return codecProtocolError("http/1.1 protocol error: unsupported transfer encoding");
     }
   }
+  parser_->setHasContentLength(request_or_response_headers.ContentLength() != nullptr);
 
   auto statusor = onHeadersCompleteBase();
   if (!statusor.ok()) {
@@ -800,8 +808,7 @@ void ConnectionImpl::bufferBody(const char* data, size_t length) {
 }
 
 void ConnectionImpl::dispatchBufferedBody() {
-  ASSERT(parser_->getStatus() == ParserStatus::Success ||
-         parser_->getStatus() == ParserStatus::Paused);
+  ASSERT(parser_->isOk() || parser_->isPaused());
   ASSERT(codec_status_.ok());
   if (buffered_body_.length() > 0) {
     onBody(buffered_body_);
