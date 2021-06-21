@@ -208,6 +208,33 @@ Histogram& TestStore::histogramFromStatNameWithTags(const StatName& stat_name,
   return *histogram_ref;
 }
 
+CounterGroup& TestStore::counterGroupFromString(const std::string& name,
+                                                CounterGroupDescriptorSharedPtr descriptor) {
+  CounterGroup*& counter_group_ref = counter_group_map_[name];
+  if (counter_group_ref == nullptr) {
+    counter_group_ref = &IsolatedStoreImpl::counterGroupFromString(name, descriptor);
+  }
+  return *counter_group_ref;
+}
+
+CounterGroup&
+TestStore::counterGroupFromStatNameWithTags(const StatName& stat_name,
+                                            StatNameTagVectorOptConstRef tags,
+                                            CounterGroupDescriptorSharedPtr descriptor) {
+  std::string name = symbolTable().toString(stat_name);
+  CounterGroup*& counter_group_ref = counter_group_map_[name];
+  if (counter_group_ref == nullptr) {
+    counter_group_ref =
+        &IsolatedStoreImpl::counterGroupFromStatNameWithTags(stat_name, tags, descriptor);
+  } else {
+    // Ensures StatNames with the same string representation are specified
+    // consistently using symbolic/dynamic components on every access.
+    ASSERT(counter_group_ref->statName() == stat_name, "Inconsistent dynamic vs symbolic "
+                                                       "stat name specification");
+  }
+  return *counter_group_ref;
+}
+
 template <class StatType>
 using StatTypeOptConstRef = absl::optional<std::reference_wrapper<const StatType>>;
 

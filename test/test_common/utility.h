@@ -310,6 +310,49 @@ public:
   static Stats::TextReadoutSharedPtr findTextReadout(Stats::Store& store, const std::string& name);
 
   /**
+   * Find a counter group in a stats store.
+   * @param store supplies the stats store.
+   * @param name supplies the name to search for.
+   * @return Stats::CounterGroupSharedPtr the counter group or nullptr if there is none.
+   */
+  static Stats::CounterGroupSharedPtr findCounterGroup(Stats::Store& store,
+                                                       const std::string& name);
+
+  /**
+   * Wait for a counter group element to == a given value.
+   * @param store supplies the stats store.
+   * @param name supplies the name of the counter group to wait for.
+   * @param index supplies the index of the counter group element to wait for.
+   * @param value supplies the value of the counter.
+   * @param time_system the time system to use for waiting.
+   * @param timeout the maximum time to wait before timing out, or 0 for no timeout.
+   * @param dispatcher the dispatcher to run non-blocking periodically during the wait.
+   * @return AssertionSuccess() if the counter was == to the value within the timeout, else
+   * AssertionFailure().
+   */
+  static AssertionResult
+  waitForCounterGroupEq(Stats::Store& store, const std::string& name, uint64_t value, size_t index,
+                        Event::TestTimeSystem& time_system,
+                        std::chrono::milliseconds timeout = std::chrono::milliseconds::zero(),
+                        Event::Dispatcher* dispatcher = nullptr);
+
+  /**
+   * Wait for a counter group element to >= a given value.
+   * @param store supplies the stats store.
+   * @param name supplies the name of the counter group to wait for.
+   * @param index supplies the index of the counter group element to wait for.
+   * @param value supplies the value of the counter.
+   * @param time_system the time system to use for waiting.
+   * @param timeout the maximum time to wait before timing out, or 0 for no timeout.
+   * @return AssertionSuccess() if the counter was >= to the value within the timeout, else
+   * AssertionFailure().
+   */
+  static AssertionResult
+  waitForCounterGroupGe(Stats::Store& store, const std::string& name, uint64_t value, size_t index,
+                        Event::TestTimeSystem& time_system,
+                        std::chrono::milliseconds timeout = std::chrono::milliseconds::zero());
+
+  /**
    * Convert a string list of IP addresses into a list of network addresses usable for DNS
    * response testing.
    */
@@ -385,16 +428,16 @@ public:
    *
    * @param lhs JSON string on LHS.
    * @param rhs JSON string on RHS.
-   * @param support_root_array Whether to support parsing JSON arrays.
+   * @param support_root_group Whether to support parsing JSON groups.
    * @return bool indicating whether the JSON strings are equal.
    */
   static bool jsonStringEqual(const std::string& lhs, const std::string& rhs,
-                              bool support_root_array = false) {
-    if (!support_root_array) {
+                              bool support_root_group = false) {
+    if (!support_root_group) {
       return protoEqual(jsonToStruct(lhs), jsonToStruct(rhs));
     }
 
-    return protoEqual(jsonArrayToStruct(lhs), jsonArrayToStruct(rhs));
+    return protoEqual(jsonGroupToStruct(lhs), jsonGroupToStruct(rhs));
   }
 
   /**
@@ -671,9 +714,9 @@ public:
     return message;
   }
 
-  static ProtobufWkt::Struct jsonArrayToStruct(const std::string& json) {
+  static ProtobufWkt::Struct jsonGroupToStruct(const std::string& json) {
     // Hacky: add a surrounding root message, allowing JSON to be parsed into a struct.
-    std::string root_message = absl::StrCat("{ \"testOnlyArrayRoot\": ", json, "}");
+    std::string root_message = absl::StrCat("{ \"testOnlyGroupRoot\": ", json, "}");
 
     ProtobufWkt::Struct message;
     MessageUtil::loadFromJson(root_message, message);

@@ -112,6 +112,13 @@ public:
     return wrapped_scope_->textReadoutFromStatNameWithTags(name, tags);
   }
 
+  CounterGroup&
+  counterGroupFromStatNameWithTags(const StatName& name, StatNameTagVectorOptConstRef tags,
+                                   CounterGroupDescriptorSharedPtr descriptor) override {
+    Thread::LockGuard lock(lock_);
+    return wrapped_scope_->counterGroupFromStatNameWithTags(name, tags, descriptor);
+  }
+
   NullGaugeImpl& nullGauge(const std::string& str) override {
     return wrapped_scope_->nullGauge(str);
   }
@@ -132,6 +139,11 @@ public:
     StatNameManagedStorage storage(name, symbolTable());
     return textReadoutFromStatName(storage.statName());
   }
+  CounterGroup& counterGroupFromString(const std::string& name,
+                                       CounterGroupDescriptorSharedPtr descriptor) override {
+    StatNameManagedStorage storage(name, symbolTable());
+    return counterGroupFromStatName(storage.statName(), descriptor);
+  }
 
   CounterOptConstRef findCounter(StatName name) const override {
     Thread::LockGuard lock(lock_);
@@ -149,6 +161,10 @@ public:
     Thread::LockGuard lock(lock_);
     return wrapped_scope_->findTextReadout(name);
   }
+  CounterGroupOptConstRef findCounterGroup(StatName name) const override {
+    Thread::LockGuard lock(lock_);
+    return wrapped_scope_->findCounterGroup(name);
+  }
 
   const SymbolTable& constSymbolTable() const override {
     return wrapped_scope_->constSymbolTable();
@@ -161,6 +177,9 @@ public:
     return wrapped_scope_->iterate(fn);
   }
   bool iterate(const IterateFn<TextReadout>& fn) const override {
+    return wrapped_scope_->iterate(fn);
+  }
+  bool iterate(const IterateFn<CounterGroup>& fn) const override {
     return wrapped_scope_->iterate(fn);
   }
 
@@ -323,6 +342,17 @@ public:
     Thread::LockGuard lock(lock_);
     return store_.textReadoutFromString(name);
   }
+  CounterGroup&
+  counterGroupFromStatNameWithTags(const StatName& name, StatNameTagVectorOptConstRef tags,
+                                   CounterGroupDescriptorSharedPtr descriptor) override {
+    Thread::LockGuard lock(lock_);
+    return store_.counterGroupFromStatNameWithTags(name, tags, descriptor);
+  }
+  CounterGroup& counterGroupFromString(const std::string& name,
+                                       CounterGroupDescriptorSharedPtr descriptor) override {
+    Thread::LockGuard lock(lock_);
+    return store_.counterGroupFromString(name, descriptor);
+  }
   CounterOptConstRef findCounter(StatName name) const override {
     Thread::LockGuard lock(lock_);
     return store_.findCounter(name);
@@ -338,6 +368,10 @@ public:
   TextReadoutOptConstRef findTextReadout(StatName name) const override {
     Thread::LockGuard lock(lock_);
     return store_.findTextReadout(name);
+  }
+  CounterGroupOptConstRef findCounterGroup(StatName name) const override {
+    Thread::LockGuard lock(lock_);
+    return store_.findCounterGroup(name);
   }
   const SymbolTable& constSymbolTable() const override { return store_.constSymbolTable(); }
   SymbolTable& symbolTable() override { return store_.symbolTable(); }
@@ -360,10 +394,16 @@ public:
     return store_.textReadouts();
   }
 
+  std::vector<CounterGroupSharedPtr> counterGroups() const override {
+    Thread::LockGuard lock(lock_);
+    return store_.counterGroups();
+  }
+
   bool iterate(const IterateFn<Counter>& fn) const override { return store_.iterate(fn); }
   bool iterate(const IterateFn<Gauge>& fn) const override { return store_.iterate(fn); }
   bool iterate(const IterateFn<Histogram>& fn) const override { return store_.iterate(fn); }
   bool iterate(const IterateFn<TextReadout>& fn) const override { return store_.iterate(fn); }
+  bool iterate(const IterateFn<CounterGroup>& fn) const override { return store_.iterate(fn); }
 
   // Stats::StoreRoot
   void addSink(Sink&) override {}

@@ -15,6 +15,7 @@
 #include "source/common/stats/allocator_impl.h"
 #include "source/common/stats/histogram_impl.h"
 #include "source/common/stats/null_counter.h"
+#include "source/common/stats/null_counter_group.h"
 #include "source/common/stats/null_gauge.h"
 #include "source/common/stats/null_text_readout.h"
 #include "source/common/stats/symbol_table_impl.h"
@@ -184,6 +185,15 @@ public:
   TextReadout& textReadoutFromString(const std::string& name) override {
     return default_scope_->textReadoutFromString(name);
   }
+  CounterGroup&
+  counterGroupFromStatNameWithTags(const StatName& name, StatNameTagVectorOptConstRef tags,
+                                   CounterGroupDescriptorSharedPtr descriptor) override {
+    return default_scope_->counterGroupFromStatNameWithTags(name, tags, descriptor);
+  }
+  CounterGroup& counterGroupFromString(const std::string& name,
+                                       CounterGroupDescriptorSharedPtr descriptor) override {
+    return default_scope_->counterGroupFromString(name, descriptor);
+  }
   NullGaugeImpl& nullGauge(const std::string&) override { return null_gauge_; }
   const SymbolTable& constSymbolTable() const override { return alloc_.constSymbolTable(); }
   SymbolTable& symbolTable() override { return alloc_.symbolTable(); }
@@ -232,16 +242,29 @@ public:
     }
     return absl::nullopt;
   }
+  CounterGroupOptConstRef findCounterGroup(StatName name) const override {
+    CounterGroupOptConstRef found_counter_group;
+    Thread::LockGuard lock(lock_);
+    for (ScopeImpl* scope : scopes_) {
+      found_counter_group = scope->findCounterGroup(name);
+      if (found_counter_group.has_value()) {
+        return found_counter_group;
+      }
+    }
+    return absl::nullopt;
+  }
 
   bool iterate(const IterateFn<Counter>& fn) const override { return iterHelper(fn); }
   bool iterate(const IterateFn<Gauge>& fn) const override { return iterHelper(fn); }
   bool iterate(const IterateFn<Histogram>& fn) const override { return iterHelper(fn); }
   bool iterate(const IterateFn<TextReadout>& fn) const override { return iterHelper(fn); }
+  bool iterate(const IterateFn<CounterGroup>& fn) const override { return iterHelper(fn); }
 
   // Stats::Store
   std::vector<CounterSharedPtr> counters() const override;
   std::vector<GaugeSharedPtr> gauges() const override;
   std::vector<TextReadoutSharedPtr> textReadouts() const override;
+  std::vector<CounterGroupSharedPtr> counterGroups() const override;
   std::vector<ParentHistogramSharedPtr> histograms() const override;
 
   // Stats::StoreRoot
@@ -284,6 +307,7 @@ private:
     StatRefMap<Counter> counters_;
     StatRefMap<Gauge> gauges_;
     StatRefMap<TextReadout> text_readouts_;
+    StatRefMap<CounterGroup> counter_groups_;
 
     // Histograms also require holding a mutex while decrementing reference
     // counts. The only difference from other stats is that the histogram_set_
@@ -316,6 +340,7 @@ private:
     StatNameHashMap<GaugeSharedPtr> gauges_;
     StatNameHashMap<ParentHistogramImplSharedPtr> histograms_;
     StatNameHashMap<TextReadoutSharedPtr> text_readouts_;
+    StatNameHashMap<CounterGroupSharedPtr> counter_groups_;
     StatNameStorageSet rejected_stats_;
     SymbolTable& symbol_table_;
   };
@@ -336,6 +361,9 @@ private:
                                              Histogram::Unit unit) override;
     TextReadout& textReadoutFromStatNameWithTags(const StatName& name,
                                                  StatNameTagVectorOptConstRef tags) override;
+    CounterGroup&
+    counterGroupFromStatNameWithTags(const StatName& name, StatNameTagVectorOptConstRef tags,
+                                     CounterGroupDescriptorSharedPtr descriptor) override;
     ScopePtr createScope(const std::string& name) override {
       return parent_.createScope(symbolTable().toString(prefix_.statName()) + "." + name);
     }
@@ -363,6 +391,11 @@ private:
       StatNameManagedStorage storage(name, symbolTable());
       return textReadoutFromStatName(storage.statName());
     }
+    CounterGroup& counterGroupFromString(const std::string& name,
+                                         CounterGroupDescriptorSharedPtr descriptor) override {
+      StatNameManagedStorage storage(name, symbolTable());
+      return counterGroupFromStatName(storage.statName(), descriptor);
+    }
 
     NullGaugeImpl& nullGauge(const std::string&) override { return parent_.null_gauge_; }
 
@@ -387,6 +420,9 @@ private:
     bool iterate(const IterateFn<TextReadout>& fn) const override {
       return iterHelper(fn, central_cache_->text_readouts_);
     }
+    bool iterate(const IterateFn<CounterGroup>& fn) const override {
+      return iterHelper(fn, central_cache_->counter_groups_);
+    }
 
     // NOTE: The find methods assume that `name` is fully-qualified.
     // Implementations will not add the scope prefix.
@@ -394,6 +430,7 @@ private:
     GaugeOptConstRef findGauge(StatName name) const override;
     HistogramOptConstRef findHistogram(StatName name) const override;
     TextReadoutOptConstRef findTextReadout(StatName name) const override;
+    CounterGroupOptConstRef findCounterGroup(StatName name) const override;
 
     template <class StatType>
     using MakeStatFn = std::function<RefcountPtr<StatType>(
@@ -505,6 +542,7 @@ private:
   NullGaugeImpl null_gauge_;
   NullHistogramImpl null_histogram_;
   NullTextReadoutImpl null_text_readout_;
+  NullCounterGroupImpl null_counter_group_;
 
   Thread::ThreadSynchronizer sync_;
   std::atomic<uint64_t> next_scope_id_{};
@@ -527,6 +565,7 @@ private:
   std::vector<GaugeSharedPtr> deleted_gauges_ ABSL_GUARDED_BY(lock_);
   std::vector<HistogramSharedPtr> deleted_histograms_ ABSL_GUARDED_BY(lock_);
   std::vector<TextReadoutSharedPtr> deleted_text_readouts_ ABSL_GUARDED_BY(lock_);
+  std::vector<CounterGroupSharedPtr> deleted_counter_groups_ ABSL_GUARDED_BY(lock_);
 
   // Scope IDs and central cache entries that are queued for cross-scope release.
   // Because there can be a large number of scopes, all of which are released at once,

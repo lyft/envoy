@@ -25,6 +25,7 @@ using CounterOptConstRef = absl::optional<std::reference_wrapper<const Counter>>
 using GaugeOptConstRef = absl::optional<std::reference_wrapper<const Gauge>>;
 using HistogramOptConstRef = absl::optional<std::reference_wrapper<const Histogram>>;
 using TextReadoutOptConstRef = absl::optional<std::reference_wrapper<const TextReadout>>;
+using CounterGroupOptConstRef = absl::optional<std::reference_wrapper<const CounterGroup>>;
 using ScopePtr = std::unique_ptr<Scope>;
 using ScopeSharedPtr = std::shared_ptr<Scope>;
 
@@ -179,6 +180,38 @@ public:
   virtual TextReadout& textReadoutFromString(const std::string& name) PURE;
 
   /**
+   * Creates a CounterGroup from the stat name. Tag extraction will be performed on the name.
+   * @param name The name of the stat, obtained from the SymbolTable.
+   * @param descriptor The size of the group.
+   * @return a counter group within the scope's namespace with a particular value type.
+   */
+  CounterGroup& counterGroupFromStatName(const StatName& name,
+                                         CounterGroupDescriptorSharedPtr descriptor) {
+    return counterGroupFromStatNameWithTags(name, absl::nullopt, descriptor);
+  }
+
+  /**
+   * Creates a CounterGroup from the stat name and tags. If tags are not provided, tag extraction
+   * will be performed on the name.
+   * @param name The name of the stat, obtained from the SymbolTable.
+   * @param tags optionally specified tags.
+   * @param descriptor The size of the group.
+   * @return a counter group within the scope's namespace with a particular value type.
+   */
+  virtual CounterGroup&
+  counterGroupFromStatNameWithTags(const StatName& name, StatNameTagVectorOptConstRef tags,
+                                   CounterGroupDescriptorSharedPtr descriptor) PURE;
+
+  /**
+   * TODO(#6667): this variant is deprecated: use counterGroupFromStatName.
+   * @param name The name, expressed as a string.
+   * @param descriptor The size of the group.
+   * @return a counter group within the scope's namespace with a particular value type.
+   */
+  virtual CounterGroup& counterGroupFromString(const std::string& name,
+                                               CounterGroupDescriptorSharedPtr descriptor) PURE;
+
+  /**
    * @param The name of the stat, obtained from the SymbolTable.
    * @return a reference to a counter within the scope's namespace, if it exists.
    */
@@ -202,6 +235,12 @@ public:
    * @return a reference to a text readout within the scope's namespace, if it exists.
    */
   virtual TextReadoutOptConstRef findTextReadout(StatName name) const PURE;
+
+  /**
+   * @param The name of the stat, obtained from the SymbolTable.
+   * @return a reference to a text readout within the scope's namespace, if it exists.
+   */
+  virtual CounterGroupOptConstRef findCounterGroup(StatName name) const PURE;
 
   /**
    * @return a reference to the symbol table.
@@ -249,6 +288,17 @@ public:
    *         was hit.
    */
   virtual bool iterate(const IterateFn<TextReadout>& fn) const PURE;
+
+  /**
+   * Calls 'fn' for every counter group. Note that in the case of overlapping
+   * scopes, the implementation may call fn more than one time for each
+   * counter group. Iteration stops if `fn` returns false;
+   *
+   * @param fn Function to be run for every counter group, or until fn return false.
+   * @return false if fn(text_readout) return false during iteration, true if every counter group
+   *         was hit.
+   */
+  virtual bool iterate(const IterateFn<CounterGroup>& fn) const PURE;
 };
 
 } // namespace Stats

@@ -26,6 +26,9 @@ public:
                                            Histogram::Unit unit) override;
   TextReadout& textReadoutFromStatNameWithTags(const StatName& name,
                                                StatNameTagVectorOptConstRef tags) override;
+  CounterGroup&
+  counterGroupFromStatNameWithTags(const StatName& name, StatNameTagVectorOptConstRef tags,
+                                   CounterGroupDescriptorSharedPtr descriptor) override;
   void deliverHistogramToSinks(const Histogram& histograms, uint64_t val) override;
 
   Counter& counterFromString(const std::string& name) override {
@@ -44,11 +47,17 @@ public:
     StatNameManagedStorage storage(name, symbolTable());
     return Scope::textReadoutFromStatName(storage.statName());
   }
+  CounterGroup& counterGroupFromString(const std::string& name,
+                                       CounterGroupDescriptorSharedPtr descriptor) override {
+    StatNameManagedStorage storage(name, symbolTable());
+    return Scope::counterGroupFromStatName(storage.statName(), descriptor);
+  }
 
   CounterOptConstRef findCounter(StatName name) const override;
   GaugeOptConstRef findGauge(StatName name) const override;
   HistogramOptConstRef findHistogram(StatName name) const override;
   TextReadoutOptConstRef findTextReadout(StatName name) const override;
+  CounterGroupOptConstRef findCounterGroup(StatName name) const override;
 
   const SymbolTable& constSymbolTable() const final { return scope_.constSymbolTable(); }
   SymbolTable& symbolTable() final { return scope_.symbolTable(); }
@@ -59,6 +68,7 @@ public:
   bool iterate(const IterateFn<Gauge>& fn) const override { return iterHelper(fn); }
   bool iterate(const IterateFn<Histogram>& fn) const override { return iterHelper(fn); }
   bool iterate(const IterateFn<TextReadout>& fn) const override { return iterHelper(fn); }
+  bool iterate(const IterateFn<CounterGroup>& fn) const override { return iterHelper(fn); }
 
 private:
   template <class StatType> bool iterHelper(const IterateFn<StatType>& fn) const {

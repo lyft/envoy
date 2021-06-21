@@ -190,5 +190,80 @@ public:
 
 using TextReadoutSharedPtr = RefcountPtr<TextReadout>;
 
+class CounterGroupDescriptor {
+public:
+  virtual ~CounterGroupDescriptor() = default;
+
+  /**
+   * Returns the suffix for the name of the counter at the specific index.
+   */
+  virtual absl::string_view nameSuffix(size_t index) const PURE;
+
+  /**
+   * Returns the number of counters in the group.
+   */
+  virtual size_t size() const PURE;
+};
+
+using CounterGroupDescriptorSharedPtr = std::shared_ptr<CounterGroupDescriptor>;
+
+/**
+ * An group of always incrementing counters with latching capability. Each increment is added
+ * both to a global counter as well as periodic counter. Calling latch() returns the periodic
+ * counter and clears it.
+ */
+class CounterGroup : public Metric {
+public:
+  ~CounterGroup() override = default;
+
+  /**
+   * Adds the specified amount to the counter at the specified index.
+   * @param index The index of the counter to add.
+   * @param amount The value to add to the counter.
+   */
+  virtual void add(size_t index, uint64_t amount) PURE;
+
+  /**
+   * Increments the the counter at the specified index.
+   * @param index The index of the counter to increment.
+   */
+  virtual void inc(size_t index) PURE;
+
+  /**
+   * Returns the value of the periodic counter at the specified index, then resets
+   * that periodic counter.
+   * @param index The index of the counter.
+   * @return The value of the counter at the specified index.
+   */
+  virtual uint64_t latch(size_t index) PURE;
+
+  /**
+   * Resets the the counter at the specified index.
+   * @param index The index of the counter to reset.
+   */
+  virtual void reset(size_t index) PURE;
+
+  /**
+   * Returns the value of the counter at the specified index.
+   * @param index The index of the counter.
+   * @return The value of the counter at the specified index.
+   */
+  virtual uint64_t value(size_t index) const PURE;
+
+  /**
+   * Returns the number of entries in the group.
+   * @return The number of entries in the group.
+   */
+  virtual size_t maxEntries() const PURE;
+
+  /**
+   * Returns the suffix for the name of the counter at the specific index.
+   * @return the suffix for the name of the counter at the specific index.
+   */
+  virtual absl::string_view nameSuffix(size_t index) const PURE;
+};
+
+using CounterGroupSharedPtr = RefcountPtr<CounterGroup>;
+
 } // namespace Stats
 } // namespace Envoy

@@ -251,6 +251,39 @@ public:
   std::string value_;
 };
 
+class MockCounterGroupDescriptor : public Envoy::Stats::CounterGroupDescriptor {
+public:
+  MockCounterGroupDescriptor() = default;
+  ~MockCounterGroupDescriptor() override = default;
+  MOCK_METHOD(absl::string_view, nameSuffix, (size_t index), (const));
+  MOCK_METHOD(size_t, size, (), (const));
+};
+
+class MockCounterGroup : public MockStatWithRefcount<CounterGroup> {
+public:
+  MockCounterGroup();
+  ~MockCounterGroup() override;
+
+  MOCK_METHOD(void, add, (size_t index, uint64_t amount));
+  MOCK_METHOD(void, inc, (size_t index));
+  MOCK_METHOD(uint64_t, latch, (size_t index));
+  MOCK_METHOD(void, reset, (size_t index));
+  MOCK_METHOD(bool, used, (), (const));
+  MOCK_METHOD(uint64_t, value, (size_t index), (const));
+
+  bool used_;
+  std::vector<uint64_t> value_;
+  std::vector<uint64_t> latch_;
+
+  // RefcountInterface
+  void incRefCount() override { refcount_helper_.incRefCount(); }
+  bool decRefCount() override { return refcount_helper_.decRefCount(); }
+  uint32_t use_count() const override { return refcount_helper_.use_count(); }
+
+private:
+  RefcountHelper refcount_helper_;
+};
+
 class MockMetricSnapshot : public MetricSnapshot {
 public:
   MockMetricSnapshot();

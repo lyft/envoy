@@ -30,6 +30,9 @@ public:
                            Gauge::ImportMode import_mode) override;
   TextReadoutSharedPtr makeTextReadout(StatName name, StatName tag_extracted_name,
                                        const StatNameTagVector& stat_name_tags) override;
+  CounterGroupSharedPtr makeCounterGroup(StatName name, StatName tag_extracted_name,
+                                         const StatNameTagVector& stat_name_tags,
+                                         CounterGroupDescriptorSharedPtr descriptor) override;
   SymbolTable& symbolTable() override { return symbol_table_; }
   const SymbolTable& constSymbolTable() const override { return symbol_table_; }
 
@@ -56,15 +59,13 @@ private:
   friend class CounterImpl;
   friend class GaugeImpl;
   friend class TextReadoutImpl;
+  friend class CounterGroupImpl;
   friend class NotifyingAllocatorImpl;
-
-  void removeCounterFromSetLockHeld(Counter* counter) ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
-  void removeGaugeFromSetLockHeld(Gauge* gauge) ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
-  void removeTextReadoutFromSetLockHeld(Counter* counter) ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   StatSet<Counter> counters_ ABSL_GUARDED_BY(mutex_);
   StatSet<Gauge> gauges_ ABSL_GUARDED_BY(mutex_);
   StatSet<TextReadout> text_readouts_ ABSL_GUARDED_BY(mutex_);
+  StatSet<CounterGroup> counter_groups_ ABSL_GUARDED_BY(mutex_);
 
   SymbolTable& symbol_table_;
 

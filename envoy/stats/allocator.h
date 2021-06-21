@@ -55,6 +55,18 @@ public:
    */
   virtual TextReadoutSharedPtr makeTextReadout(StatName name, StatName tag_extracted_name,
                                                const StatNameTagVector& stat_name_tags) PURE;
+
+  /**
+   * @param name the full name of the group.
+   * @param tag_extracted_name the name of the stat with tag-values stripped out.
+   * @param tags the tag values.
+   * @param descriptor the maximum number of entries in the group.
+   * @return CounterSharedPtr a counter.
+   */
+  virtual CounterGroupSharedPtr makeCounterGroup(StatName name, StatName tag_extracted_name,
+                                                 const StatNameTagVector& stat_name_tags,
+                                                 CounterGroupDescriptorSharedPtr descriptor) PURE;
+
   virtual const SymbolTable& constSymbolTable() const PURE;
   virtual SymbolTable& symbolTable() PURE;
 

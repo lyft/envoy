@@ -30,12 +30,15 @@ public:
   using GaugeAllocator = std::function<RefcountPtr<Base>(StatName, Gauge::ImportMode)>;
   using HistogramAllocator = std::function<RefcountPtr<Base>(StatName, Histogram::Unit)>;
   using TextReadoutAllocator = std::function<RefcountPtr<Base>(StatName name, TextReadout::Type)>;
+  using CounterGroupAllocator =
+      std::function<RefcountPtr<Base>(StatName name, CounterGroupDescriptorSharedPtr descriptor)>;
   using BaseOptConstRef = absl::optional<std::reference_wrapper<const Base>>;
 
   IsolatedStatsCache(CounterAllocator alloc) : counter_alloc_(alloc) {}
   IsolatedStatsCache(GaugeAllocator alloc) : gauge_alloc_(alloc) {}
   IsolatedStatsCache(HistogramAllocator alloc) : histogram_alloc_(alloc) {}
   IsolatedStatsCache(TextReadoutAllocator alloc) : text_readout_alloc_(alloc) {}
+  IsolatedStatsCache(CounterGroupAllocator alloc) : counter_group_alloc_(alloc) {}
 
   Base& get(StatName name) {
     auto stat = stats_.find(name);
@@ -81,6 +84,28 @@ public:
     return *new_stat;
   }
 
+  Base& get(StatName name, CounterGroupDescriptorSharedPtr descriptor) {
+    auto stat = stats_.find(name);
+    if (stat != stats_.end()) {
+      return *stat->second;
+    }
+
+    RefcountPtr<Base> new_stat = counter_group_alloc_(name, descriptor);
+    stats_.emplace(new_stat->statName(), new_stat);
+    return *new_stat;
+  }
+
+  Base& get(StatName name, size_t size) {
+    auto stat = stats_.find(name);
+    if (stat != stats_.end()) {
+      return *stat->second;
+    }
+
+    RefcountPtr<Base> new_stat = counter_group_alloc_(name, size);
+    stats_.emplace(new_stat->statName(), new_stat);
+    return *new_stat;
+  }
+
   std::vector<RefcountPtr<Base>> toVector() const {
     std::vector<RefcountPtr<Base>> vec;
     vec.reserve(stats_.size());
@@ -113,6 +138,7 @@ private:
 
   StatNameHashMap<RefcountPtr<Base>> stats_;
   CounterAllocator counter_alloc_;
+  CounterGroupAllocator counter_group_alloc_;
   GaugeAllocator gauge_alloc_;
   HistogramAllocator histogram_alloc_;
   TextReadoutAllocator text_readout_alloc_;
@@ -155,6 +181,13 @@ public:
         text_readouts_.get(joiner.nameWithTags(), TextReadout::Type::Default);
     return text_readout;
   }
+  CounterGroup&
+  counterGroupFromStatNameWithTags(const StatName& name, StatNameTagVectorOptConstRef tags,
+                                   CounterGroupDescriptorSharedPtr descriptor) override {
+    TagUtility::TagStatNameJoiner joiner(name, tags, symbolTable());
+    CounterGroup& counter_group = counter_groups_.get(joiner.nameWithTags(), descriptor);
+    return counter_group;
+  }
   CounterOptConstRef findCounter(StatName name) const override { return counters_.find(name); }
   GaugeOptConstRef findGauge(StatName name) const override { return gauges_.find(name); }
   HistogramOptConstRef findHistogram(StatName name) const override {
@@ -163,12 +196,18 @@ public:
   TextReadoutOptConstRef findTextReadout(StatName name) const override {
     return text_readouts_.find(name);
   }
+  CounterGroupOptConstRef findCounterGroup(StatName name) const override {
+    return counter_groups_.find(name);
+  }
 
   bool iterate(const IterateFn<Counter>& fn) const override { return counters_.iterate(fn); }
   bool iterate(const IterateFn<Gauge>& fn) const override { return gauges_.iterate(fn); }
   bool iterate(const IterateFn<Histogram>& fn) const override { return histograms_.iterate(fn); }
   bool iterate(const IterateFn<TextReadout>& fn) const override {
     return text_readouts_.iterate(fn);
+  }
+  bool iterate(const IterateFn<CounterGroup>& fn) const override {
+    return counter_groups_.iterate(fn);
   }
 
   // Stats::Store
@@ -187,6 +226,9 @@ public:
   std::vector<TextReadoutSharedPtr> textReadouts() const override {
     return text_readouts_.toVector();
   }
+  std::vector<CounterGroupSharedPtr> counterGroups() const override {
+    return counter_groups_.toVector();
+  }
 
   Counter& counterFromString(const std::string& name) override {
     StatNameManagedStorage storage(name, symbolTable());
@@ -204,6 +246,11 @@ public:
     StatNameManagedStorage storage(name, symbolTable());
     return textReadoutFromStatName(storage.statName());
   }
+  CounterGroup& counterGroupFromString(const std::string& name,
+                                       CounterGroupDescriptorSharedPtr descriptor) override {
+    StatNameManagedStorage storage(name, symbolTable());
+    return counterGroupFromStatName(storage.statName(), descriptor);
+  }
 
 private:
   IsolatedStoreImpl(std::unique_ptr<SymbolTable>&& symbol_table);
@@ -214,6 +261,7 @@ private:
   IsolatedStatsCache<Gauge> gauges_;
   IsolatedStatsCache<Histogram> histograms_;
   IsolatedStatsCache<TextReadout> text_readouts_;
+  IsolatedStatsCache<CounterGroup> counter_groups_;
   RefcountPtr<NullCounterImpl> null_counter_;
   RefcountPtr<NullGaugeImpl> null_gauge_;
 };

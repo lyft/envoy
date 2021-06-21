@@ -75,7 +75,8 @@ void UdpStatsdSink::flush(Stats::MetricSnapshot& snapshot) {
   }
 
   flushBuffer(buffer, writer);
-  // TODO(efimki): Add support of text readouts stats.
+  // TODO(efimki): Add support for text readouts stats.
+  // TODO(RyanTheOptimist): Add support for counter group stats.
 }
 
 void UdpStatsdSink::writeBuffer(Buffer::OwnedImpl& buffer, Writer& writer,
@@ -197,6 +198,7 @@ void TcpStatsdSink::flush(Stats::MetricSnapshot& snapshot) {
     }
   }
   // TODO(efimki): Add support of text readouts stats.
+  // TODO(RyanTheOptimist): Add support for counter group stats.
   tls_sink.endFlush(true);
 }
 
