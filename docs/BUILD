@@ -12,6 +12,7 @@ exports_files([
     "empty_extensions.json",
     "redirects.txt",
     "VERSION",
+    "root/version_history/current.rst",
 ])
 
 envoy_package()
