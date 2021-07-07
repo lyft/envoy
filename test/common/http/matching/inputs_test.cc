@@ -33,6 +33,17 @@ TEST(HttpHeadersDataInputBase, ReturnValueNotPersistedBetweenCalls) {
             Matcher::DataInputGetResult::DataAvailability::AllDataAvailable);
   EXPECT_EQ(result.data_, absl::nullopt);
 }
+
+TEST(HttpRequestCookiesDataInput, Idempotence) {
+  HttpRequestCookiesDataInput input("mycookie");
+
+  HttpMatchingDataImpl data;
+  TestRequestHeaderMapImpl request_headers({{"Cookie", "mycookie=foo;mycookie=bar"}});
+  data.onRequestHeaders(request_headers);
+
+  EXPECT_EQ(input.get(data).data_, "foo,bar");
+  EXPECT_EQ(input.get(data).data_, "foo,bar");
+}
 } // namespace Matching
 } // namespace Http
 } // namespace Envoy

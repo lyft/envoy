@@ -138,9 +138,9 @@ FilterStats FilterConfig::generateStats(const std::string& prefix, Stats::Scope&
 
 void OAuth2CookieValidator::setParams(const Http::RequestHeaderMap& headers,
                                       const std::string& secret) {
-  expires_ = Http::Utility::parseCookieValue(headers, "OauthExpires");
-  token_ = Http::Utility::parseCookieValue(headers, "BearerToken");
-  hmac_ = Http::Utility::parseCookieValue(headers, "OauthHMAC");
+  expires_ = std::string{Http::Utility::parseCookieValue(headers, "OauthExpires")};
+  token_ = std::string{Http::Utility::parseCookieValue(headers, "BearerToken")};
+  hmac_ = std::string{Http::Utility::parseCookieValue(headers, "OauthHMAC")};
   host_ = headers.Host()->value().getStringView();
 
   secret_.assign(secret.begin(), secret.end());

@@ -250,18 +250,38 @@ std::string stripQueryString(const HeaderString& path);
 /**
  * Parse a particular value out of a cookie
  * @param headers supplies the headers to get the cookie from.
- * @param key the key for the particular cookie value to return
- * @return std::string the parsed cookie value, or "" if none exists
+ * @param key the key for the particular cookie value to return.
+ * @return absl::string_view the parsed cookie value, or a default constructed absl::string_view if
+ *         it doesn't exist.
  **/
-std::string parseCookieValue(const HeaderMap& headers, const std::string& key);
+absl::string_view parseCookieValue(const HeaderMap& headers, const absl::string_view key);
 
 /**
  * Parse a particular value out of a set-cookie
  * @param headers supplies the headers to get the set-cookie from.
  * @param key the key for the particular set-cookie value to return
- * @return std::string the parsed set-cookie value, or "" if none exists
+ * @return absl::string_view the parsed set-cookie value, or "" if none exists
  **/
-std::string parseSetCookieValue(const HeaderMap& headers, const std::string& key);
+absl::string_view parseSetCookieValue(const HeaderMap& headers, const absl::string_view key);
+
+/**
+ * Parse particular value(s) out of a cookie. The difference with
+ * parseCookieValue is that it returns all the values of key, in case it is set
+ * multiple times in the cookie headers, as in this example:
+ *
+ * ``Cookie: mykey=a;mykey=b``
+ *
+ * @param headers supplies the headers to get the cookie from.
+ * @param key the key for the particular cookie value to return.
+ * @param max_vals the maximum number of values to return. 0 means all of them.
+ * @param reversed_order return the cookie values in reversed order
+ * @return absl::InlinedVector<absl::string_view, 2> a vector of
+ *         absl::string_view objects containing the extracted values.
+ **/
+absl::InlinedVector<absl::string_view, 2> parseCookieValues(const HeaderMap& headers,
+                                                            const absl::string_view key,
+                                                            size_t max_vals = 0,
+                                                            bool reversed_order = false);
 
 /**
  * Produce the value for a Set-Cookie header with the given parameters.
