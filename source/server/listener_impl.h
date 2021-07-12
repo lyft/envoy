@@ -5,6 +5,7 @@
 #include "envoy/access_log/access_log.h"
 #include "envoy/config/core/v3/base.pb.h"
 #include "envoy/config/listener/v3/listener.pb.h"
+#include "envoy/event/timer.h"
 #include "envoy/network/drain_decision.h"
 #include "envoy/network/filter.h"
 #include "envoy/server/drain_manager.h"
@@ -94,13 +95,13 @@ private:
  * The common functionality shared by PerListenerFilterFactoryContexts and
  * PerFilterChainFactoryFactoryContexts.
  */
-class ListenerFactoryContextBaseImpl final : public Configuration::FactoryContext,
+class ListenerFactoryContextBaseImpl final : public Configuration::DrainableFactoryContext,
                                              public Network::DrainDecision {
 public:
   ListenerFactoryContextBaseImpl(Envoy::Server::Instance& server,
                                  ProtobufMessage::ValidationVisitor& validation_visitor,
                                  const envoy::config::listener::v3::Listener& config,
-                                 Server::DrainManagerPtr drain_manager);
+                                 DrainManagerPtr drain_manager);
   AccessLog::AccessLogManager& accessLogManager() override;
   Upstream::ClusterManager& clusterManager() override;
   Event::Dispatcher& dispatcher() override;
@@ -131,14 +132,11 @@ public:
   Stats::Scope& listenerScope() override;
 
   // DrainDecision
-  bool drainClose() const override {
-    return drain_manager_->drainClose() || server_.drainManager().drainClose();
+  bool drainClose() const override { return drain_manager_->drainClose(); }
+  Common::CallbackHandlePtr addOnDrainCloseCb(DrainCloseCb cb) const override {
+    return drain_manager_->addOnDrainCloseCb(cb);
   }
-  Common::CallbackHandlePtr addOnDrainCloseCb(DrainCloseCb) const override {
-    NOT_REACHED_GCOVR_EXCL_LINE;
-    return nullptr;
-  }
-  Server::DrainManager& drainManager();
+  Server::DrainManager& drainManager() override;
 
 private:
   Envoy::Server::Instance& server_;
@@ -147,7 +145,7 @@ private:
   Stats::ScopePtr global_scope_;
   Stats::ScopePtr listener_scope_; // Stats with listener named scope.
   ProtobufMessage::ValidationVisitor& validation_visitor_;
-  const Server::DrainManagerPtr drain_manager_;
+  Server::DrainManagerPtr drain_manager_;
 };
 
 class ListenerImpl;

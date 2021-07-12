@@ -2146,7 +2146,7 @@ TEST_F(HttpConnectionManagerImplTest, DisableHttp1KeepAliveWhenOverloaded) {
       .WillByDefault(ReturnRef(disable_http_keep_alive));
 
   codec_->protocol_ = Protocol::Http11;
-  setup(false, "");
+  setup(false, "", true, false, false);
 
   EXPECT_CALL(random_, random())
       .WillRepeatedly(Return(static_cast<float>(Random::RandomGenerator::max()) * 0.5));
@@ -2225,6 +2225,93 @@ TEST_F(HttpConnectionManagerImplTest, DisableHttp2KeepAliveWhenOverloaded) {
   conn_manager_->onData(fake_input, false);
   Mock::VerifyAndClearExpectations(codec_);
   EXPECT_EQ(1, stats_.named_.downstream_cx_overload_disable_keepalive_.value());
+}
+
+// Verify that HTTP2 connections will receive a GOAWAY message when the drain manager signals
+// to start draining.
+TEST_F(HttpConnectionManagerImplTest, SendGoAwayOnDrainBegin) {
+  codec_->protocol_ = Protocol::Http2;
+  setup(false, "", true, false, true);
+  EXPECT_CALL(*codec_, shutdownNotice);
+
+  std::shared_ptr<MockStreamDecoderFilter> filter(new NiceMock<MockStreamDecoderFilter>());
+  EXPECT_CALL(filter_factory_, createFilterChain(_))
+      .WillOnce(Invoke([&](FilterChainFactoryCallbacks& callbacks) -> void {
+        callbacks.addStreamDecoderFilter(StreamDecoderFilterSharedPtr{filter});
+      }));
+
+  EXPECT_CALL(*codec_, dispatch(_))
+      .WillRepeatedly(Invoke([&](Buffer::Instance& data) -> Http::Status {
+        decoder_ = &conn_manager_->newStream(response_encoder_);
+        RequestHeaderMapPtr headers{new TestRequestHeaderMapImpl{{":authority", "host"},
+                                                                 {":path", "/"},
+                                                                 {":method", "GET"},
+                                                                 {"connection", "keep-alive"}}};
+        decoder_->decodeHeaders(std::move(headers), true);
+
+        ResponseHeaderMapPtr response_headers{new TestResponseHeaderMapImpl{{":status", "200"}}};
+        filter->callbacks_->streamInfo().setResponseCodeDetails("");
+        filter->callbacks_->encodeHeaders(std::move(response_headers), true, "details");
+
+        data.drain(4);
+        return Http::okStatus();
+      }));
+  EXPECT_CALL(response_encoder_, encodeHeaders(_, true));
+
+  Buffer::OwnedImpl fake_input("1234");
+  conn_manager_->onData(fake_input, false);
+
+  Event::MockTimer* drain_timer = setUpTimer();
+  EXPECT_CALL(*drain_timer, enableTimer(_, _));
+  drain_begin_timer_->invokeCallback();
+  Mock::VerifyAndClearExpectations(codec_);
+}
+
+TEST_F(HttpConnectionManagerImplTest, DrainCloseFireAfterTimeoutDrainBegin) {
+  codec_->protocol_ = Protocol::Http2;
+  EXPECT_CALL(*codec_, shutdownNotice);
+
+  idle_timeout_ = (std::chrono::milliseconds(10));
+  Event::MockTimer* idle_timer = setUpTimer();
+  EXPECT_CALL(*idle_timer, enableTimer(_, _));
+  setup(false, "", true, false, true);
+
+  MockStreamDecoderFilter* filter = new NiceMock<MockStreamDecoderFilter>();
+  EXPECT_CALL(filter_factory_, createFilterChain(_))
+      .WillOnce(Invoke([&](FilterChainFactoryCallbacks& callbacks) -> void {
+        callbacks.addStreamDecoderFilter(StreamDecoderFilterSharedPtr{filter});
+      }));
+
+  EXPECT_CALL(*idle_timer, disableTimer());
+  EXPECT_CALL(*filter, decodeHeaders(_, false))
+      .WillOnce(Return(FilterHeadersStatus::StopIteration));
+  EXPECT_CALL(*filter, decodeData(_, true))
+      .WillOnce(Return(FilterDataStatus::StopIterationNoBuffer));
+
+  startRequest(true, "hello");
+
+  EXPECT_CALL(*idle_timer, enableTimer(_, _));
+  ResponseHeaderMapPtr response_headers{new TestResponseHeaderMapImpl{{":status", "200"}}};
+  filter->callbacks_->streamInfo().setResponseCodeDetails("");
+  filter->callbacks_->encodeHeaders(std::move(response_headers), true, "details");
+
+  Event::MockTimer* drain_timer = setUpTimer();
+  EXPECT_CALL(*drain_timer, enableTimer(_, _));
+  idle_timer->invokeCallback();
+
+  // Draining has already begun so invoke the begin-drain-timer callback, should be a no-op and not
+  // cause assertion failures within the connection manager.
+  drain_begin_timer_->invokeCallback();
+  EXPECT_CALL(*drain_begin_timer_, disableTimer());
+
+  EXPECT_CALL(*codec_, goAway());
+  EXPECT_CALL(filter_callbacks_.connection_,
+              close(Network::ConnectionCloseType::FlushWriteAndDelay));
+  EXPECT_CALL(*idle_timer, disableTimer());
+  EXPECT_CALL(*drain_timer, disableTimer());
+  drain_timer->invokeCallback();
+
+  EXPECT_EQ(1U, stats_.named_.downstream_cx_idle_timeout_.value());
 }
 
 TEST_F(HttpConnectionManagerImplTest, TestStopAllIterationAndBufferOnDecodingPathFirstFilter) {
@@ -2319,10 +2406,9 @@ TEST_F(HttpConnectionManagerImplTest, TestStopAllIterationAndBufferOnEncodingPat
 }
 
 TEST_F(HttpConnectionManagerImplTest, DisableKeepAliveWhenDraining) {
-  setup(false, "");
+  setup(false, "", true, false, true);
 
-  EXPECT_CALL(drain_close_, drainClose()).WillOnce(Return(true));
-
+  EXPECT_CALL(drain_close_, drainClose()).Times(0);
   std::shared_ptr<MockStreamDecoderFilter> filter(new NiceMock<MockStreamDecoderFilter>());
   EXPECT_CALL(filter_factory_, createFilterChain(_))
       .WillOnce(Invoke([&](FilterChainFactoryCallbacks& callbacks) -> void {
@@ -2337,6 +2423,11 @@ TEST_F(HttpConnectionManagerImplTest, DisableKeepAliveWhenDraining) {
                                                                  {":method", "GET"},
                                                                  {"connection", "keep-alive"}}};
         decoder_->decodeHeaders(std::move(headers), true);
+
+        // Initiate draining before sending the response headers
+        Event::MockTimer* drain_timer = setUpTimer();
+        EXPECT_CALL(*drain_timer, enableTimer(_, _));
+        drain_begin_timer_->invokeCallback();
 
         ResponseHeaderMapPtr response_headers{new TestResponseHeaderMapImpl{{":status", "200"}}};
         filter->callbacks_->streamInfo().setResponseCodeDetails("");

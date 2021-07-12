@@ -1,6 +1,7 @@
 #pragma once
 
 #include "envoy/server/configuration.h"
+#include "envoy/server/factory_context.h"
 
 #include "source/common/router/context_impl.h"
 #include "source/extensions/transport_sockets/tls/context_manager_impl.h"
@@ -73,6 +74,15 @@ public:
   Http::ContextImpl http_context_;
   Router::ContextImpl router_context_;
   testing::NiceMock<Api::MockApi> api_;
+};
+
+class MockDrainableFactoryContext : public virtual DrainableFactoryContext,
+                                    public MockFactoryContext {
+public:
+  MockDrainableFactoryContext();
+  ~MockDrainableFactoryContext() override;
+
+  MOCK_METHOD(Server::DrainManager&, drainManager, (), (override));
 };
 } // namespace Configuration
 } // namespace Server

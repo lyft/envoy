@@ -1,6 +1,10 @@
 #include "source/server/filter_chain_manager_impl.h"
 
 #include "envoy/config/listener/v3/listener_components.pb.h"
+#include "envoy/event/dispatcher.h"
+#include "envoy/server/drain_manager.h"
+#include "envoy/thread_local/thread_local.h"
+#include "envoy/thread_local/thread_local_object.h"
 
 #include "source/common/common/cleanup.h"
 #include "source/common/common/empty_string.h"
@@ -30,14 +34,28 @@ Network::Address::InstanceConstSharedPtr fakeAddress() {
 } // namespace
 
 PerFilterChainFactoryContextImpl::PerFilterChainFactoryContextImpl(
-    Configuration::FactoryContext& parent_context, Init::Manager& init_manager)
-    : parent_context_(parent_context), init_manager_(init_manager) {}
+    Configuration::DrainableFactoryContext& parent_context, Init::Manager& init_manager)
+    : parent_context_(parent_context), init_manager_(init_manager),
+      drain_manager_(parent_context.drainManager().createChildManager(parent_context.dispatcher())),
+      tls_(parent_context.threadLocal().allocateSlot()) {
 
-bool PerFilterChainFactoryContextImpl::drainClose() const {
-  return is_draining_.load() || parent_context_.drainDecision().drainClose();
+  // Create a drain-manager per thread as children to the top level filter-chain drain manager.
+  // This reduces the amount of cross-thread coordination required for registering and firing
+  // on-drain callbacks.
+  tls_->set([this](Event::Dispatcher& dispatcher) -> ThreadLocal::ThreadLocalObjectSharedPtr {
+    return drain_manager_->createChildManager(dispatcher);
+  });
 }
 
-Network::DrainDecision& PerFilterChainFactoryContextImpl::drainDecision() { return *this; }
+bool PerFilterChainFactoryContextImpl::drainClose() const { return drain_manager_->drainClose(); }
+Common::CallbackHandlePtr
+PerFilterChainFactoryContextImpl::addOnDrainCloseCb(DrainCloseCb cb) const {
+  return drain_manager_->addOnDrainCloseCb(cb);
+}
+
+Network::DrainDecision& PerFilterChainFactoryContextImpl::drainDecision() {
+  return tls_->getTyped<Server::DrainManager>();
+}
 
 Init::Manager& PerFilterChainFactoryContextImpl::initManager() { return init_manager_; }
 
@@ -141,7 +159,7 @@ Stats::Scope& PerFilterChainFactoryContextImpl::listenerScope() {
 
 FilterChainManagerImpl::FilterChainManagerImpl(
     const Network::Address::InstanceConstSharedPtr& address,
-    Configuration::FactoryContext& factory_context, Init::Manager& init_manager,
+    Configuration::DrainableFactoryContext& factory_context, Init::Manager& init_manager,
     const FilterChainManagerImpl& parent_manager)
     : address_(address), parent_context_(factory_context), origin_(&parent_manager),
       init_manager_(init_manager) {}

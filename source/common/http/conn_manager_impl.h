@@ -409,6 +409,7 @@ private:
 
   void resetAllStreams(absl::optional<StreamInfo::ResponseFlag> response_flag,
                        absl::string_view details);
+  void createStartDrainTimer(std::chrono::milliseconds drain_delay);
   void onIdleTimeout();
   void onConnectionDurationTimeout();
   void onDrainTimeout();
@@ -436,6 +437,8 @@ private:
   Event::TimerPtr connection_idle_timer_;
   // A connection duration timer. Armed during handling new connection if enabled in config.
   Event::TimerPtr connection_duration_timer_;
+  Common::CallbackHandlePtr start_drain_cb_;
+  Event::TimerPtr start_drain_timer_;
   Event::TimerPtr drain_timer_;
   Random::RandomGenerator& random_generator_;
   Http::Context& http_context_;

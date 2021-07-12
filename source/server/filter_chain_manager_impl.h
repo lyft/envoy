@@ -6,6 +6,7 @@
 
 #include "envoy/config/listener/v3/listener_components.pb.h"
 #include "envoy/network/drain_decision.h"
+#include "envoy/server/drain_manager.h"
 #include "envoy/server/filter_config.h"
 #include "envoy/server/instance.h"
 #include "envoy/server/options.h"
@@ -42,15 +43,12 @@ public:
 class PerFilterChainFactoryContextImpl : public Configuration::FilterChainFactoryContext,
                                          public Network::DrainDecision {
 public:
-  explicit PerFilterChainFactoryContextImpl(Configuration::FactoryContext& parent_context,
+  explicit PerFilterChainFactoryContextImpl(Configuration::DrainableFactoryContext& parent_context,
                                             Init::Manager& init_manager);
 
   // DrainDecision
   bool drainClose() const override;
-  Common::CallbackHandlePtr addOnDrainCloseCb(DrainCloseCb) const override {
-    NOT_REACHED_GCOVR_EXCL_LINE;
-    return nullptr;
-  }
+  Common::CallbackHandlePtr addOnDrainCloseCb(DrainCloseCb cb) const override;
 
   // Configuration::FactoryContext
   AccessLog::AccessLogManager& accessLogManager() override;
@@ -82,12 +80,15 @@ public:
   Configuration::TransportSocketFactoryContext& getTransportSocketFactoryContext() const override;
   Stats::Scope& listenerScope() override;
 
-  void startDraining() override { is_draining_.store(true); }
+  void startDraining() override {
+    drain_manager_->startDrainSequence([] {});
+  }
 
 private:
-  Configuration::FactoryContext& parent_context_;
+  Configuration::DrainableFactoryContext& parent_context_;
   Init::Manager& init_manager_;
-  std::atomic<bool> is_draining_{false};
+  DrainManagerPtr drain_manager_;
+  ThreadLocal::SlotPtr tls_;
 };
 
 class FilterChainImpl : public Network::DrainableFilterChain {
@@ -186,12 +187,12 @@ public:
       absl::flat_hash_map<envoy::config::listener::v3::FilterChain,
                           Network::DrainableFilterChainSharedPtr, MessageUtil, MessageUtil>;
   FilterChainManagerImpl(const Network::Address::InstanceConstSharedPtr& address,
-                         Configuration::FactoryContext& factory_context,
+                         Configuration::DrainableFactoryContext& factory_context,
                          Init::Manager& init_manager)
       : address_(address), parent_context_(factory_context), init_manager_(init_manager) {}
 
   FilterChainManagerImpl(const Network::Address::InstanceConstSharedPtr& address,
-                         Configuration::FactoryContext& factory_context,
+                         Configuration::DrainableFactoryContext& factory_context,
                          Init::Manager& init_manager, const FilterChainManagerImpl& parent_manager);
 
   // FilterChainFactoryContextCreator
@@ -364,7 +365,7 @@ private:
 
   const Network::Address::InstanceConstSharedPtr address_;
   // This is the reference to a factory context which all the generations of listener share.
-  Configuration::FactoryContext& parent_context_;
+  Configuration::DrainableFactoryContext& parent_context_;
   std::list<std::shared_ptr<Configuration::FilterChainFactoryContext>> factory_contexts_;
 
   // Reference to the previous generation of filter chain manager to share the filter chains.

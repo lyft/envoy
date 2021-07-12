@@ -1,5 +1,6 @@
 #include "source/common/http/conn_manager_impl.h"
 
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <list>
@@ -154,6 +155,16 @@ void ConnectionManagerImpl::initializeReadFilterCallbacks(Network::ReadFilterCal
       {stats_.named_.downstream_cx_rx_bytes_total_, stats_.named_.downstream_cx_rx_bytes_buffered_,
        stats_.named_.downstream_cx_tx_bytes_total_, stats_.named_.downstream_cx_tx_bytes_buffered_,
        nullptr, &stats_.named_.downstream_cx_delayed_close_timeout_});
+
+  // register callback for drain-close events
+  start_drain_cb_ =
+      drain_close_.addOnDrainCloseCb([this](std::chrono::milliseconds drain_delay) -> void {
+        // de-register callback since we only want this to fire once
+        start_drain_cb_.reset();
+
+        // create timer to _begin_ draining
+        createStartDrainTimer(drain_delay);
+      });
 }
 
 ConnectionManagerImpl::~ConnectionManagerImpl() {
@@ -455,6 +466,15 @@ void ConnectionManagerImpl::doConnectionClose(
     connection_duration_timer_.reset();
   }
 
+  if (start_drain_cb_) {
+    start_drain_cb_.reset();
+  }
+
+  if (start_drain_timer_) {
+    start_drain_timer_->disableTimer();
+    start_drain_timer_.reset();
+  }
+
   if (drain_timer_) {
     drain_timer_->disableTimer();
     drain_timer_.reset();
@@ -482,6 +502,25 @@ void ConnectionManagerImpl::doConnectionClose(
   if (close_type.has_value()) {
     read_callbacks_->connection().close(close_type.value());
   }
+}
+
+void ConnectionManagerImpl::createStartDrainTimer(std::chrono::milliseconds drain_delay) {
+  start_drain_timer_ = read_callbacks_->connection().dispatcher().createTimer([this]() -> void {
+    if (drain_state_ != DrainState::NotDraining) {
+      return;
+    }
+    if (!codec_) {
+      stats_.named_.downstream_cx_drain_close_.inc();
+      doConnectionClose(Network::ConnectionCloseType::FlushWrite, absl::nullopt, "");
+    } else {
+      startDrainSequence();
+      stats_.named_.downstream_cx_drain_close_.inc();
+      for (const auto& stream : streams_) {
+        ENVOY_STREAM_LOG(debug, "drain closing connection", *stream);
+      }
+    }
+  });
+  start_drain_timer_->enableTimer(drain_delay);
 }
 
 void ConnectionManagerImpl::onGoAway(GoAwayErrorCode) {
@@ -1362,26 +1401,18 @@ void ConnectionManagerImpl::ActiveStream::encodeHeaders(ResponseHeaderMap& heade
                                                   connection_manager_.config_,
                                                   connection_manager_.config_.via());
 
-  bool drain_connection_due_to_overload = false;
   if (connection_manager_.drain_state_ == DrainState::NotDraining &&
       connection_manager_.random_generator_.bernoulli(
           connection_manager_.overload_disable_keepalive_ref_.value())) {
-    ENVOY_STREAM_LOG(debug, "disabling keepalive due to envoy overload", *this);
-    drain_connection_due_to_overload = true;
+    ENVOY_STREAM_LOG(
+        debug, "disabling keepalive due to envoy overload and drain closing connection", *this);
     connection_manager_.stats_.named_.downstream_cx_overload_disable_keepalive_.inc();
-  }
-
-  // See if we want to drain/close the connection. Send the go away frame prior to encoding the
-  // header block.
-  if (connection_manager_.drain_state_ == DrainState::NotDraining &&
-      (connection_manager_.drain_close_.drainClose() || drain_connection_due_to_overload)) {
+    connection_manager_.stats_.named_.downstream_cx_drain_close_.inc();
 
     // This doesn't really do anything for HTTP/1.1 other then give the connection another boost
     // of time to race with incoming requests. For HTTP/2 connections, send a GOAWAY frame to
     // prevent any new streams.
     connection_manager_.startDrainSequence();
-    connection_manager_.stats_.named_.downstream_cx_drain_close_.inc();
-    ENVOY_STREAM_LOG(debug, "drain closing connection", *this);
   }
 
   if (connection_manager_.codec_->protocol() == Protocol::Http10) {

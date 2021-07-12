@@ -77,7 +77,7 @@ public:
     return dispatcher().createDnsResolver({}, envoy::config::core::v3::DnsResolverOptions());
   }
   void drainListeners() override { NOT_IMPLEMENTED_GCOVR_EXCL_LINE; }
-  DrainManager& drainManager() override { NOT_IMPLEMENTED_GCOVR_EXCL_LINE; }
+  DrainManager& drainManager() override { return *drain_manager_; }
   AccessLog::AccessLogManager& accessLogManager() override { return access_log_manager_; }
   void failHealthcheck(bool) override { NOT_IMPLEMENTED_GCOVR_EXCL_LINE; }
   HotRestart& hotRestart() override { NOT_IMPLEMENTED_GCOVR_EXCL_LINE; }
@@ -208,6 +208,7 @@ private:
   Router::ContextImpl router_context_;
   Event::TimeSystem& time_system_;
   ServerFactoryContextImpl server_contexts_;
+  DrainManagerPtr drain_manager_;
 };
 
 } // namespace Server

@@ -279,7 +279,8 @@ ListenerImpl::ListenerImpl(const envoy::config::listener::v3::Listener& config,
       continue_on_listener_filters_timeout_(config.continue_on_listener_filters_timeout()),
       listener_factory_context_(std::make_shared<PerListenerFactoryContextImpl>(
           parent.server_, validation_visitor_, config, this, *this,
-          parent.factory_.createDrainManager(config.drain_type()))),
+          parent.server_.drainManager().createChildManager(parent.server_.dispatcher(),
+                                                           config.drain_type()))),
       filter_chain_manager_(address_, listener_factory_context_->parentFactoryContext(),
                             initManager()),
       cx_limit_runtime_key_("envoy.resource_limits.listener." + config_.name() +
