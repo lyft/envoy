@@ -3,6 +3,8 @@
 #include "envoy/config/route/v3/scoped_route.pb.h"
 #include "envoy/extensions/filters/network/http_connection_manager/v3/http_connection_manager.pb.h"
 
+#include "source/common/config/metadata.h"
+
 namespace Envoy {
 namespace Router {
 
@@ -16,32 +18,62 @@ bool ScopeKey::operator==(const ScopeKey& other) const {
   return this->hash() == other.hash();
 }
 
-HeaderValueExtractorImpl::HeaderValueExtractorImpl(
-    ScopedRoutes::ScopeKeyBuilder::FragmentBuilder&& config)
-    : FragmentBuilderBase(std::move(config)),
-      header_value_extractor_config_(config_.header_value_extractor()) {
-  ASSERT(config_.type_case() ==
-             ScopedRoutes::ScopeKeyBuilder::FragmentBuilder::kHeaderValueExtractor,
-         "header_value_extractor is not set.");
-  if (header_value_extractor_config_.extract_type_case() ==
-      ScopedRoutes::ScopeKeyBuilder::FragmentBuilder::HeaderValueExtractor::kIndex) {
-    if (header_value_extractor_config_.index() != 0 &&
-        header_value_extractor_config_.element_separator().empty()) {
-      throw ProtoValidationException("Index > 0 for empty string element separator.",
-                                     header_value_extractor_config_);
+void FragmentBuilderImpl::validateHeaderValueExtractorConfig(
+    const HeaderValueExtractorConfig& config) const {
+  if (config.extract_type_case() == HeaderValueExtractorConfig::kIndex) {
+    if (config.index() != 0 && config.element_separator().empty()) {
+      throw ProtoValidationException("Index > 0 for empty string element separator.", config);
     }
   }
-  if (header_value_extractor_config_.extract_type_case() ==
-      ScopedRoutes::ScopeKeyBuilder::FragmentBuilder::HeaderValueExtractor::EXTRACT_TYPE_NOT_SET) {
-    throw ProtoValidationException("HeaderValueExtractor extract_type not set.",
-                                   header_value_extractor_config_);
+
+  if (config.extract_type_case() == HeaderValueExtractorConfig::EXTRACT_TYPE_NOT_SET) {
+    throw ProtoValidationException("HeaderValueExtractor extract_type not set.", config);
+  }
+}
+
+void FragmentBuilderImpl::validateMetadataValueExtractorConfig(
+    const MetadataValueExtractorConfig& config) const {
+  // Assuming support for only a single type of metadata extraction.
+  ASSERT(config.metadata_extract_type_case() == MetadataValueExtractorConfig::kMetadataKey);
+}
+
+FragmentBuilderImpl::FragmentBuilderImpl(ScopedRoutes::ScopeKeyBuilder::FragmentBuilder config)
+    : FragmentBuilderBase(std::move(config)) {
+  switch (config_.type_case()) {
+  case FragmentBuilderConfig::kHeaderValueExtractor:
+    validateHeaderValueExtractorConfig(config_.header_value_extractor());
+    break;
+  case FragmentBuilderConfig::kMetadataValueExtractor:
+    validateMetadataValueExtractorConfig(config_.metadata_value_extractor());
+    break;
+  case FragmentBuilderConfig::TYPE_NOT_SET:
+    ASSERT(false, "value extractor is not set.");
+    throw ProtoValidationException("value extractor is not set.", config);
+  default:
+    NOT_IMPLEMENTED_GCOVR_EXCL_LINE;
   }
 }
 
 std::unique_ptr<ScopeKeyFragmentBase>
-HeaderValueExtractorImpl::computeFragment(const Http::HeaderMap& headers) const {
-  const auto header_entry =
-      headers.get(Envoy::Http::LowerCaseString(header_value_extractor_config_.name()));
+FragmentBuilderImpl::computeFragment(const Http::HeaderMap& headers, const Metadata& meta) const {
+  switch (config_.type_case()) {
+  case FragmentBuilderConfig::kHeaderValueExtractor:
+    return computeFragmentFromHeader(headers, config_.header_value_extractor());
+  case FragmentBuilderConfig::kMetadataValueExtractor:
+    return computeFragmentFromMetadata(meta, config_.metadata_value_extractor());
+  default:
+    NOT_REACHED_GCOVR_EXCL_LINE; // Caught in constructor already.
+  }
+  return nullptr;
+}
+
+std::unique_ptr<ScopeKeyFragmentBase> FragmentBuilderImpl::computeFragmentFromHeader(
+    const Http::HeaderMap& headers,
+    const ScopedRoutes::ScopeKeyBuilder::FragmentBuilder::HeaderValueExtractor&
+        header_value_extractor_config) const {
+
+  const auto& header_entry =
+      headers.get(Envoy::Http::LowerCaseString(header_value_extractor_config.name()));
   if (header_entry.empty()) {
     return nullptr;
   }
@@ -49,30 +81,43 @@ HeaderValueExtractorImpl::computeFragment(const Http::HeaderMap& headers) const 
   // This is an implicitly untrusted header, so per the API documentation only the first
   // value is used.
   std::vector<absl::string_view> elements{header_entry[0]->value().getStringView()};
-  if (header_value_extractor_config_.element_separator().length() > 0) {
+  if (header_value_extractor_config.element_separator().length() > 0) {
     elements = absl::StrSplit(header_entry[0]->value().getStringView(),
-                              header_value_extractor_config_.element_separator());
+                              header_value_extractor_config.element_separator());
   }
-  switch (header_value_extractor_config_.extract_type_case()) {
+  switch (header_value_extractor_config.extract_type_case()) {
   case ScopedRoutes::ScopeKeyBuilder::FragmentBuilder::HeaderValueExtractor::kElement:
     for (const auto& element : elements) {
       std::pair<absl::string_view, absl::string_view> key_value = absl::StrSplit(
-          element, absl::MaxSplits(header_value_extractor_config_.element().separator(), 1));
-      if (key_value.first == header_value_extractor_config_.element().key()) {
+          element, absl::MaxSplits(header_value_extractor_config.element().separator(), 1));
+      if (key_value.first == header_value_extractor_config.element().key()) {
         return std::make_unique<StringKeyFragment>(key_value.second);
       }
     }
     break;
   case ScopedRoutes::ScopeKeyBuilder::FragmentBuilder::HeaderValueExtractor::kIndex:
-    if (header_value_extractor_config_.index() < elements.size()) {
-      return std::make_unique<StringKeyFragment>(elements[header_value_extractor_config_.index()]);
+    if (header_value_extractor_config.index() < elements.size()) {
+      return std::make_unique<StringKeyFragment>(elements[header_value_extractor_config.index()]);
     }
     break;
-  default:                       // EXTRACT_TYPE_NOT_SET
-    NOT_REACHED_GCOVR_EXCL_LINE; // Caught in constructor already.
+  default:
+    NOT_REACHED_GCOVR_EXCL_LINE;
   }
 
   return nullptr;
+}
+
+std::unique_ptr<ScopeKeyFragmentBase>
+FragmentBuilderImpl::computeFragmentFromMetadata(const Metadata& meta,
+                                                 const MetadataValueExtractorConfig& config) const {
+  const auto& value = Envoy::Config::Metadata::metadataValue(&meta, config.metadata_key());
+  switch (value.kind_case()) {
+  case ProtobufWkt::Value::kStringValue:
+    return std::make_unique<StringKeyFragment>(value.string_value());
+  default:
+    // TODO (tonya11en): Support structured metadata fragments.
+    return nullptr;
+  }
 }
 
 ScopedRouteInfo::ScopedRouteInfo(envoy::config::route::v3::ScopedRouteConfiguration&& config_proto,
@@ -96,7 +141,8 @@ ScopeKeyBuilderImpl::ScopeKeyBuilderImpl(ScopedRoutes::ScopeKeyBuilder&& config)
   for (const auto& fragment_builder : config_.fragments()) {
     switch (fragment_builder.type_case()) {
     case ScopedRoutes::ScopeKeyBuilder::FragmentBuilder::kHeaderValueExtractor:
-      fragment_builders_.emplace_back(std::make_unique<HeaderValueExtractorImpl>(
+    case ScopedRoutes::ScopeKeyBuilder::FragmentBuilder::kMetadataValueExtractor:
+      fragment_builders_.emplace_back(std::make_unique<FragmentBuilderImpl>(
           ScopedRoutes::ScopeKeyBuilder::FragmentBuilder(fragment_builder)));
       break;
     default:
@@ -105,11 +151,14 @@ ScopeKeyBuilderImpl::ScopeKeyBuilderImpl(ScopedRoutes::ScopeKeyBuilder&& config)
   }
 }
 
-ScopeKeyPtr ScopeKeyBuilderImpl::computeScopeKey(const Http::HeaderMap& headers) const {
+ScopeKeyPtr
+ScopeKeyBuilderImpl::computeScopeKey(const Http::HeaderMap& headers,
+                                     const envoy::config::core::v3::Metadata& meta) const {
   ScopeKey key;
   for (const auto& builder : fragment_builders_) {
     // returns nullopt if a null fragment is found.
-    std::unique_ptr<ScopeKeyFragmentBase> fragment = builder->computeFragment(headers);
+    std::unique_ptr<ScopeKeyFragmentBase> fragment = builder->computeFragment(headers, meta);
+
     if (fragment == nullptr) {
       return nullptr;
     }
@@ -143,8 +192,9 @@ void ScopedConfigImpl::removeRoutingScopes(const std::vector<std::string>& scope
 }
 
 Router::ConfigConstSharedPtr
-ScopedConfigImpl::getRouteConfig(const Http::HeaderMap& headers) const {
-  ScopeKeyPtr scope_key = scope_key_builder_.computeScopeKey(headers);
+ScopedConfigImpl::getRouteConfig(const Http::HeaderMap& headers,
+                                 const envoy::config::core::v3::Metadata& meta) const {
+  ScopeKeyPtr scope_key = scope_key_builder_.computeScopeKey(headers, meta);
   if (scope_key == nullptr) {
     return nullptr;
   }
@@ -155,8 +205,9 @@ ScopedConfigImpl::getRouteConfig(const Http::HeaderMap& headers) const {
   return nullptr;
 }
 
-ScopeKeyPtr ScopedConfigImpl::computeScopeKey(const Http::HeaderMap& headers) const {
-  ScopeKeyPtr scope_key = scope_key_builder_.computeScopeKey(headers);
+ScopeKeyPtr ScopedConfigImpl::computeScopeKey(const Http::HeaderMap& headers,
+                                              const envoy::config::core::v3::Metadata& meta) const {
+  ScopeKeyPtr scope_key = scope_key_builder_.computeScopeKey(headers, meta);
   if (scope_key &&
       scoped_route_info_by_key_.find(scope_key->hash()) != scoped_route_info_by_key_.end()) {
     return scope_key;
