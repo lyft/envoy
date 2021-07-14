@@ -1,5 +1,6 @@
 #include "source/common/buffer/buffer_impl.h"
 #include "source/extensions/filters/network/mysql_proxy/mysql_codec.h"
+#include "source/extensions/filters/network/mysql_proxy/mysql_decoder_impl.h"
 #include "source/extensions/filters/network/mysql_proxy/mysql_filter.h"
 #include "source/extensions/filters/network/mysql_proxy/mysql_utils.h"
 
@@ -24,12 +25,13 @@ public:
 
   void initialize() {
     config_ = std::make_shared<MySQLFilterConfig>(stat_prefix_, scope_);
-    filter_ = std::make_unique<MySQLFilter>(config_);
+
+    filter_ = std::make_unique<MySQLMonitorFilter>(config_, DecoderFactoryImpl::instance_);
     filter_->initializeReadFilterCallbacks(filter_callbacks_);
   }
 
   MySQLFilterConfigSharedPtr config_;
-  std::unique_ptr<MySQLFilter> filter_;
+  std::unique_ptr<MySQLMonitorFilter> filter_;
   Stats::IsolatedStoreImpl scope_;
   std::string stat_prefix_{"test."};
   NiceMock<Network::MockReadFilterCallbacks> filter_callbacks_;

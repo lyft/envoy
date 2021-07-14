@@ -115,6 +115,7 @@ constexpr uint16_t ER_NET_PACKETS_OUT_OF_ORDER = 1156;
 constexpr uint16_t ER_PASSWD_LENGTH = 1372;
 constexpr uint16_t ER_ACCESS_DENIED_ERROR = 1045;
 constexpr uint16_t ER_ER_BAD_DB_ERROR = 1049;
+constexpr uint16_t ER_UNKNOWN_ERROR = 1106;
 constexpr uint8_t MYSQL_SQL_STATE_MARKER = '#';
 
 enum DecodeStatus : uint8_t {
@@ -138,6 +139,16 @@ public:
     seq_ = seq;
     return parseMessage(data, len);
   }
+
+  void encodePacket(Buffer::Instance& buf, uint8_t seq) const {
+    Buffer::OwnedImpl pkg;
+    encode(pkg);
+    uint32_t header = (seq << 24) | (pkg.length() & MYSQL_HDR_PKT_SIZE_MASK);
+    buf.writeLEInt<uint32_t>(header);
+    buf.move(pkg);
+  }
+
+  void encodePacket(Buffer::Instance& buf) const { encodePacket(buf, seq_); }
 
 protected:
   friend class MySQLTestUtils;

@@ -2,6 +2,9 @@ syntax = "proto3";
 
 package envoy.extensions.filters.network.mysql_proxy.v3;
 
+import "envoy/config/core/v3/base.proto";
+
+import "udpa/annotations/sensitive.proto";
 import "udpa/annotations/status.proto";
 import "udpa/annotations/versioning.proto";
 import "validate/validate.proto";
@@ -15,9 +18,35 @@ option (udpa.annotations.file_status).package_version_status = ACTIVE;
 // MySQL Proxy :ref:`configuration overview <config_network_filters_mysql_proxy>`.
 // [#extension: envoy.filters.network.mysql_proxy]
 
+// Auth information of MySQL.
+message AuthInfo {
+  // Name of SQL account which client want to login.
+  config.core.v3.DataSource username = 1 [(udpa.annotations.sensitive) = true];
+
+  // Password of SQL account which client want to login.
+  config.core.v3.DataSource password = 2 [(udpa.annotations.sensitive) = true];
+}
+
 message MySQLProxy {
   option (udpa.annotations.versioning).previous_message_type =
       "envoy.config.filter.network.mysql_proxy.v1alpha1.MySQLProxy";
+
+  // DatabaseRoutes use database name as key to route.
+  message DatabaseRoutes {
+    message Route {
+      // Database name that must exact match with client connection db name. https://dev.mysql.com/doc/refman/5.7/en/identifier-length.html
+      string database = 1 [(validate.rules).string = {max_bytes: 64}];
+
+      // Upstream cluster to forward the command to.
+      string cluster = 2 [(validate.rules).string = {min_len: 1}];
+    }
+
+    // [#not-implemented-hide:] List of database routes.
+    repeated Route routes = 1;
+
+    // Optional catch-all route to forward connection that not specific database name.
+    Route catch_all_route = 2;
+  }
 
   // The human readable prefix to use when emitting :ref:`statistics
   // <config_network_filters_mysql_proxy_stats>`.
@@ -26,4 +55,42 @@ message MySQLProxy {
   // [#not-implemented-hide:] The optional path to use for writing MySQL access logs.
   // If the access log field is empty, access logs will not be written.
   string access_log = 2;
+
+  // List of **unique** db name used to separate connections from different database to different
+  // clusters.
+  //
+  // Example:
+  //
+  // .. code-block:: yaml
+  //
+  //    database_routes:
+  //      routes:
+  //        - database: "ab"
+  //          cluster: "cluster_a"
+  //        - database: "abc"
+  //          cluster: "cluster_b"
+  //      catch_all_route:
+  //        - cluster: "catch_all_cluster"
+  //
+  // When using the above routes, the following connect data source names would be sent to:
+  //
+  // * ``jdbc:mysql://host1:9001/database_a`` would sent command to cluster_a.
+  // * ``jdbc:mysql://host1:9001/database_c`` will return ER_ER_BAD_DB_ERROR.
+  // * ``jdbc:mysql://host1:9001/`` will send command to catch_all_cluster.
+  //
+  // .. note::
+  //   If `database_routes` is set, MySQL proxy will manage the upstream connections, it becomes terminal filter, should be put as last in filter chain.
+  //   If `database_routes` is not set, MySQL proxy works as a transport proxy, and must not be put as last in filter chain.
+  DatabaseRoutes database_routes = 3;
+
+  // [#not-implemented-hide:] Downstream client username/password. Authenticate MySQL client connections locally by forcing downstream clients connect with this username/password. If the username/password is not match, then ER_ACCESS_DENIED_ERROR will return;
+  AuthInfo downstream_auth_info = 4;
+}
+
+// [#not-implemented-hide:] MySQLProtocolOptions specifies MySQL upstream protocol options. This object is used in
+// :ref:`typed_extension_protocol_options<envoy_api_field_config.cluster.v3.Cluster.typed_extension_protocol_options>`,
+// keyed by the name `envoy.filters.network.mysql_proxy`.
+message MySQLProtocolOptions {
+  // Upstream database username/password.
+  AuthInfo upstream_auth_info = 1 [(validate.rules).message = {required: true}];
 }

@@ -1,12 +1,13 @@
 #pragma once
 
 #include "envoy/access_log/access_log.h"
+#include "envoy/api/api.h"
+#include "envoy/buffer/buffer.h"
 #include "envoy/network/connection.h"
 #include "envoy/network/filter.h"
-#include "envoy/stats/scope.h"
-#include "envoy/stats/stats.h"
-#include "envoy/stats/stats_macros.h"
+#include "envoy/tcp/conn_pool.h"
 
+#include "source/common/buffer/buffer_impl.h"
 #include "source/common/common/logger.h"
 #include "source/extensions/filters/network/mysql_proxy/mysql_codec.h"
 #include "source/extensions/filters/network/mysql_proxy/mysql_codec_clogin.h"
@@ -16,6 +17,8 @@
 #include "source/extensions/filters/network/mysql_proxy/mysql_codec_switch_resp.h"
 #include "source/extensions/filters/network/mysql_proxy/mysql_decoder.h"
 #include "source/extensions/filters/network/mysql_proxy/mysql_session.h"
+#include "source/extensions/filters/network/mysql_proxy/route.h"
+#include "source/extensions/filters/network/mysql_proxy/stats.h"
 
 namespace Envoy {
 namespace Extensions {
@@ -23,53 +26,14 @@ namespace NetworkFilters {
 namespace MySQLProxy {
 
 /**
- * All MySQL proxy stats. @see stats_macros.h
+ * Implementation of MySQL monitor filter, just decode message and collect stats.
  */
-#define ALL_MYSQL_PROXY_STATS(COUNTER)                                                             \
-  COUNTER(sessions)                                                                                \
-  COUNTER(login_attempts)                                                                          \
-  COUNTER(login_failures)                                                                          \
-  COUNTER(decoder_errors)                                                                          \
-  COUNTER(protocol_errors)                                                                         \
-  COUNTER(upgraded_to_ssl)                                                                         \
-  COUNTER(auth_switch_request)                                                                     \
-  COUNTER(queries_parsed)                                                                          \
-  COUNTER(queries_parse_error)
-
-/**
- * Struct definition for all MySQL proxy stats. @see stats_macros.h
- */
-struct MySQLProxyStats {
-  ALL_MYSQL_PROXY_STATS(GENERATE_COUNTER_STRUCT)
-};
-
-/**
- * Configuration for the MySQL proxy filter.
- */
-class MySQLFilterConfig {
+class MySQLMonitorFilter : public Network::Filter,
+                           public DecoderCallbacks,
+                           public Logger::Loggable<Logger::Id::filter> {
 public:
-  MySQLFilterConfig(const std::string& stat_prefix, Stats::Scope& scope);
-
-  const MySQLProxyStats& stats() { return stats_; }
-
-  Stats::Scope& scope_;
-  MySQLProxyStats stats_;
-
-private:
-  MySQLProxyStats generateStats(const std::string& prefix, Stats::Scope& scope) {
-    return MySQLProxyStats{ALL_MYSQL_PROXY_STATS(POOL_COUNTER_PREFIX(scope, prefix))};
-  }
-};
-
-using MySQLFilterConfigSharedPtr = std::shared_ptr<MySQLFilterConfig>;
-
-/**
- * Implementation of MySQL proxy filter.
- */
-class MySQLFilter : public Network::Filter, DecoderCallbacks, Logger::Loggable<Logger::Id::filter> {
-public:
-  MySQLFilter(MySQLFilterConfigSharedPtr config);
-  ~MySQLFilter() override = default;
+  MySQLMonitorFilter(MySQLFilterConfigSharedPtr config, DecoderFactory& factory);
+  ~MySQLMonitorFilter() override = default;
 
   // Network::ReadFilter
   Network::FilterStatus onData(Buffer::Instance& data, bool end_stream) override;
@@ -91,15 +55,18 @@ public:
   void onCommandResponse(CommandResponse&) override{};
 
   void doDecode(Buffer::Instance& buffer);
+  void clearDynamicData();
   DecoderPtr createDecoder(DecoderCallbacks& callbacks);
   MySQLSession& getSession() { return decoder_->getSession(); }
 
-private:
-  Network::ReadFilterCallbacks* read_callbacks_{};
-  MySQLFilterConfigSharedPtr config_;
+protected:
   Buffer::OwnedImpl read_buffer_;
   Buffer::OwnedImpl write_buffer_;
-  std::unique_ptr<Decoder> decoder_;
+  DecoderPtr decoder_;
+  MySQLFilterConfigSharedPtr config_;
+  Network::ReadFilterCallbacks* read_callbacks_{};
+
+private:
   bool sniffing_{true};
 };
 
