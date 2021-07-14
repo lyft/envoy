@@ -46,6 +46,7 @@ public:
   Network::MockDrainDecision drain_decision_;
   Runtime::MockLoader runtime_;
   NiceMock<Api::MockApi> api_;
+  NiceMock<Event::MockDispatcher> dispatcher_;
 };
 
 TEST_F(RedisProxyFilterConfigTest, Normal) {
@@ -60,7 +61,7 @@ TEST_F(RedisProxyFilterConfigTest, Normal) {
 
   envoy::extensions::filters::network::redis_proxy::v3::RedisProxy proto_config =
       parseProtoFromYaml(yaml_string);
-  ProxyFilterConfig config(proto_config, store_, drain_decision_, runtime_, api_);
+  ProxyFilterConfig config(proto_config, store_, drain_decision_, runtime_, api_, dispatcher_);
   EXPECT_EQ("redis.foo.", config.stat_prefix_);
   EXPECT_TRUE(config.downstream_auth_username_.empty());
   EXPECT_TRUE(config.downstream_auth_password_.empty());
@@ -89,7 +90,7 @@ TEST_F(RedisProxyFilterConfigTest, DownstreamAuthPasswordSet) {
 
   envoy::extensions::filters::network::redis_proxy::v3::RedisProxy proto_config =
       parseProtoFromYaml(yaml_string);
-  ProxyFilterConfig config(proto_config, store_, drain_decision_, runtime_, api_);
+  ProxyFilterConfig config(proto_config, store_, drain_decision_, runtime_, api_, dispatcher_);
   EXPECT_EQ(config.downstream_auth_password_, "somepassword");
 }
 
@@ -109,7 +110,7 @@ TEST_F(RedisProxyFilterConfigTest, DownstreamAuthAclSet) {
 
   envoy::extensions::filters::network::redis_proxy::v3::RedisProxy proto_config =
       parseProtoFromYaml(yaml_string);
-  ProxyFilterConfig config(proto_config, store_, drain_decision_, runtime_, api_);
+  ProxyFilterConfig config(proto_config, store_, drain_decision_, runtime_, api_, dispatcher_);
   EXPECT_EQ(config.downstream_auth_username_, "someusername");
   EXPECT_EQ(config.downstream_auth_password_, "somepassword");
 }
@@ -128,8 +129,8 @@ public:
   RedisProxyFilterTest(const std::string& yaml_string) {
     envoy::extensions::filters::network::redis_proxy::v3::RedisProxy proto_config =
         parseProtoFromYaml(yaml_string);
-    config_ =
-        std::make_shared<ProxyFilterConfig>(proto_config, store_, drain_decision_, runtime_, api_);
+    config_ = std::make_shared<ProxyFilterConfig>(proto_config, store_, drain_decision_, runtime_,
+                                                  api_, dispatcher_);
     filter_ = std::make_unique<ProxyFilter>(*this, Common::Redis::EncoderPtr{encoder_}, splitter_,
                                             config_);
     filter_->initializeReadFilterCallbacks(filter_callbacks_);
@@ -147,6 +148,9 @@ public:
   ~RedisProxyFilterTest() override {
     filter_.reset();
     for (const Stats::GaugeSharedPtr& gauge : store_.gauges()) {
+      if (gauge->name().compare("redis.foo.hotkey.collector.draining_counter") == 0) {
+        continue;
+      }
       EXPECT_EQ(0U, gauge->value());
     }
   }
@@ -165,9 +169,11 @@ public:
   NiceMock<Network::MockDrainDecision> drain_decision_;
   NiceMock<Runtime::MockLoader> runtime_;
   ProxyFilterConfigSharedPtr config_;
+  HotKey::HotKeyCollectorSharedPtr hk_collector_;
   std::unique_ptr<ProxyFilter> filter_;
   NiceMock<Network::MockReadFilterCallbacks> filter_callbacks_;
   NiceMock<Api::MockApi> api_;
+  NiceMock<Event::MockDispatcher> dispatcher_;
 };
 
 class RedisProxyFilterTestWithTwoCallbacks : public RedisProxyFilterTest {
@@ -354,6 +360,33 @@ TEST_F(RedisProxyFilterTest, AuthAclWhenNotRequired) {
   EXPECT_EQ(Network::FilterStatus::Continue, filter_->onData(fake_data, false));
 }
 
+TEST_F(RedisProxyFilterTest, HotkeyWhenDisabled) {
+  InSequence s;
+
+  Buffer::OwnedImpl fake_data;
+  Common::Redis::RespValuePtr request(new Common::Redis::RespValue());
+  EXPECT_CALL(*decoder_, decode(Ref(fake_data))).WillOnce(Invoke([&](Buffer::Instance&) -> void {
+    decoder_callbacks_->onRespValue(std::move(request));
+  }));
+  EXPECT_CALL(splitter_, makeRequest_(Ref(*request), _, _))
+      .WillOnce(
+          Invoke([&](const Common::Redis::RespValue&, CommandSplitter::SplitCallbacks& callbacks,
+                     Event::Dispatcher&) -> CommandSplitter::SplitRequest* {
+            EXPECT_TRUE(callbacks.connectionAllowed());
+            Common::Redis::RespValuePtr error(new Common::Redis::RespValue());
+            error->type(Common::Redis::RespType::Error);
+            error->asString() = "ERR Client sent HOTKEY, but this feature is not enabled";
+            EXPECT_CALL(*encoder_, encode(Eq(ByRef(*error)), _));
+            EXPECT_CALL(filter_callbacks_.connection_, write(_, _));
+            callbacks.onHotKey();
+            // callbacks cannot be accessed now.
+            EXPECT_TRUE(filter_->connectionAllowed());
+            return nullptr;
+          }));
+
+  EXPECT_EQ(Network::FilterStatus::Continue, filter_->onData(fake_data, false));
+}
+
 const std::string downstream_auth_password_config = R"EOF(
 prefix_routes:
   catch_all_route:
@@ -517,6 +550,53 @@ TEST_F(RedisProxyFilterWithAuthAclTest, AuthAclPasswordIncorrect) {
             callbacks.onAuth("someusername", "wrongpassword");
             // callbacks cannot be accessed now.
             EXPECT_FALSE(filter_->connectionAllowed());
+            return nullptr;
+          }));
+
+  EXPECT_EQ(Network::FilterStatus::Continue, filter_->onData(fake_data, false));
+}
+
+const std::string hotkey_min_config = R"EOF(
+prefix_routes:
+  catch_all_route:
+      cluster: fake_cluster
+stat_prefix: foo
+settings:
+  op_timeout: 0.01s
+hotkey:
+  cache_type: LFU
+  cache_capacity: 1
+  collect_dispatch_interval: 0.5s
+  attenuate_dispatch_interval: 0.5s
+  attenuate_cache_interval: 0s
+)EOF";
+
+class RedisProxyFilterWithHotkeyTest : public RedisProxyFilterTest {
+public:
+  RedisProxyFilterWithHotkeyTest() : RedisProxyFilterTest(hotkey_min_config) {}
+};
+
+TEST_F(RedisProxyFilterWithHotkeyTest, HotkeyWhenEnabled) {
+  InSequence s;
+
+  Buffer::OwnedImpl fake_data;
+  Common::Redis::RespValuePtr request(new Common::Redis::RespValue());
+  EXPECT_CALL(*decoder_, decode(Ref(fake_data))).WillOnce(Invoke([&](Buffer::Instance&) -> void {
+    decoder_callbacks_->onRespValue(std::move(request));
+  }));
+  EXPECT_CALL(splitter_, makeRequest_(Ref(*request), _, _))
+      .WillOnce(
+          Invoke([&](const Common::Redis::RespValue&, CommandSplitter::SplitCallbacks& callbacks,
+                     Event::Dispatcher&) -> CommandSplitter::SplitRequest* {
+            EXPECT_TRUE(callbacks.connectionAllowed());
+            Common::Redis::RespValuePtr reply(new Common::Redis::RespValue());
+            reply->type(Common::Redis::RespType::SimpleString);
+            reply->asString() = "Collect 0 keys in the period !";
+            EXPECT_CALL(*encoder_, encode(Eq(ByRef(*reply)), _));
+            EXPECT_CALL(filter_callbacks_.connection_, write(_, _));
+            callbacks.onHotKey();
+            // callbacks cannot be accessed now.
+            EXPECT_TRUE(filter_->connectionAllowed());
             return nullptr;
           }));
 

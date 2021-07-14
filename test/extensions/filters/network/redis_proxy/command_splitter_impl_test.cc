@@ -183,6 +183,7 @@ public:
   void makeRequest(const std::string& hash_key, Common::Redis::RespValuePtr&& request,
                    bool mirrored = false) {
     EXPECT_CALL(callbacks_, connectionAllowed()).WillOnce(Return(true));
+    EXPECT_CALL(callbacks_, incrHotKey(hash_key)).WillOnce(Return());
     EXPECT_CALL(*conn_pool_, makeRequest_(hash_key, RespVariantEq(*request), _))
         .WillOnce(DoAll(WithArg<2>(SaveArgAddress(&pool_callbacks_)), Return(&pool_request_)));
     if (mirrored) {
@@ -352,6 +353,7 @@ TEST_P(RedisSingleServerRequestTest, NoUpstream) {
   InSequence s;
 
   EXPECT_CALL(callbacks_, connectionAllowed()).WillOnce(Return(true));
+  EXPECT_CALL(callbacks_, incrHotKey("hello")).WillOnce(Return());
   Common::Redis::RespValuePtr request{new Common::Redis::RespValue()};
   makeBulkStringArray(*request, {GetParam(), "hello"});
   EXPECT_CALL(*conn_pool_, makeRequest_("hello", RespVariantEq(*request), _))
@@ -459,6 +461,7 @@ TEST_F(RedisSingleServerRequestTest, EvalNoUpstream) {
   InSequence s;
 
   EXPECT_CALL(callbacks_, connectionAllowed()).WillOnce(Return(true));
+  EXPECT_CALL(callbacks_, incrHotKey("key")).WillOnce(Return());
   Common::Redis::RespValuePtr request{new Common::Redis::RespValue()};
   makeBulkStringArray(*request, {"eval", "return {ARGV[1]}", "1", "key", "arg"});
   EXPECT_CALL(*conn_pool_, makeRequest_("key", RespVariantEq(*request), _))
@@ -518,6 +521,7 @@ public:
           null_handle_indexes.end()) {
         mirror_request_to_use = &dummy_requests[i];
       }
+      EXPECT_CALL(callbacks_, incrHotKey(std::to_string(i))).WillOnce(Return());
       EXPECT_CALL(*conn_pool_,
                   makeRequest_(std::to_string(i), CompositeArrayEq(expected_requests_[i]), _))
           .WillOnce(DoAll(WithArg<2>(SaveArgAddress(&pool_callbacks_[i])), Return(request_to_use)));
@@ -1128,6 +1132,7 @@ TEST_P(RedisSingleServerRequestWithDelayFaultTest, Fault) {
     timer_cb_ = timer_cb;
     return timer_;
   }));
+  EXPECT_CALL(callbacks_, incrHotKey(hash_key)).WillOnce(Return());
   EXPECT_CALL(*conn_pool_, makeRequest_(hash_key, RespVariantEq(*request), _))
       .WillOnce(DoAll(WithArg<2>(SaveArgAddress(&pool_callbacks_)), Return(&pool_request_)));
 

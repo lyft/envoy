@@ -51,27 +51,6 @@ envoy_cc_library(
 )
 
 envoy_cc_library(
-    name = "command_splitter_lib",
-    srcs = ["command_splitter_impl.cc"],
-    hdrs = ["command_splitter_impl.h"],
-    deps = [
-        ":command_splitter_interface",
-        ":conn_pool_lib",
-        ":router_interface",
-        "//envoy/stats:stats_macros",
-        "//envoy/stats:timespan_interface",
-        "//source/common/common:assert_lib",
-        "//source/common/common:minimal_logger_lib",
-        "//source/common/common:utility_lib",
-        "//source/common/stats:timespan_lib",
-        "//source/extensions/filters/network/common/redis:client_lib",
-        "//source/extensions/filters/network/common/redis:fault_lib",
-        "//source/extensions/filters/network/common/redis:supported_commands_lib",
-        "//source/extensions/filters/network/common/redis:utility_lib",
-    ],
-)
-
-envoy_cc_library(
     name = "conn_pool_lib",
     srcs = ["conn_pool_impl.cc"],
     hdrs = ["conn_pool_impl.h"],
@@ -91,68 +70,53 @@ envoy_cc_library(
         "//source/extensions/clusters/redis:redis_cluster_lb",
         "//source/extensions/common/redis:cluster_refresh_manager_interface",
         "//source/extensions/filters/network/common/redis:client_lib",
-        "//source/extensions/filters/network/common/redis:utility_lib",
         "@envoy_api//envoy/config/core/v3:pkg_cc_proto",
         "@envoy_api//envoy/config/endpoint/v3:pkg_cc_proto",
         "@envoy_api//envoy/extensions/filters/network/redis_proxy/v3:pkg_cc_proto",
     ],
 )
 
-envoy_cc_library(
-    name = "proxy_filter_lib",
-    srcs = ["proxy_filter.cc"],
-    hdrs = ["proxy_filter.h"],
-    deps = [
-        ":command_splitter_interface",
-        "//envoy/network:drain_decision_interface",
-        "//envoy/network:filter_interface",
-        "//envoy/upstream:cluster_manager_interface",
-        "//source/common/buffer:buffer_lib",
-        "//source/common/common:assert_lib",
-        "//source/common/config:datasource_lib",
-        "//source/common/config:utility_lib",
-        "//source/extensions/filters/network/common/redis:codec_interface",
-        "@envoy_api//envoy/extensions/filters/network/redis_proxy/v3:pkg_cc_proto",
-    ],
-)
-
 envoy_cc_extension(
     name = "config",
-    srcs = ["config.cc"],
-    hdrs = ["config.h"],
+    srcs = [
+        "command_splitter_impl.cc",
+        "config.cc",
+        "proxy_filter.cc",
+        "router_impl.cc",
+    ],
+    hdrs = [
+        "command_splitter_impl.h",
+        "config.h",
+        "proxy_filter.h",
+        "router_impl.h",
+    ],
     # TODO(#9953) clean up.
     extra_visibility = [
         "//test/integration:__subpackages__",
     ],
     deps = [
+        ":command_splitter_interface",
+        ":conn_pool_lib",
+        ":router_interface",
+        "//envoy/network:drain_decision_interface",
+        "//envoy/network:filter_interface",
+        "//envoy/stats:stats_macros",
+        "//envoy/stats:timespan_interface",
+        "//envoy/upstream:cluster_manager_interface",
         "//envoy/upstream:upstream_interface",
+        "//source/common/buffer:buffer_lib",
+        "//source/common/common:assert_lib",
+        "//source/common/common:minimal_logger_lib",
+        "//source/common/common:utility_lib",
+        "//source/common/config:datasource_lib",
+        "//source/common/config:utility_lib",
+        "//source/common/stats:timespan_lib",
         "//source/extensions/common/redis:cluster_refresh_manager_lib",
         "//source/extensions/filters/network:well_known_names",
         "//source/extensions/filters/network/common:factory_base_lib",
-        "//source/extensions/filters/network/common/redis:codec_lib",
-        "//source/extensions/filters/network/common/redis:fault_lib",
-        "//source/extensions/filters/network/common/redis:redis_command_stats_lib",
-        "//source/extensions/filters/network/redis_proxy:command_splitter_lib",
-        "//source/extensions/filters/network/redis_proxy:conn_pool_lib",
-        "//source/extensions/filters/network/redis_proxy:proxy_filter_lib",
-        "//source/extensions/filters/network/redis_proxy:router_lib",
+        "//source/extensions/filters/network/common/redis:client_lib",
+        "//source/extensions/filters/network/redis_proxy/hotkey:hotkey_lib",
         "@envoy_api//envoy/config/core/v3:pkg_cc_proto",
-        "@envoy_api//envoy/extensions/filters/network/redis_proxy/v3:pkg_cc_proto",
-    ],
-)
-
-envoy_cc_library(
-    name = "router_lib",
-    srcs = ["router_impl.cc"],
-    hdrs = ["router_impl.h"],
-    deps = [
-        ":router_interface",
-        "//envoy/thread_local:thread_local_interface",
-        "//envoy/upstream:cluster_manager_interface",
-        "//source/extensions/filters/network/common/redis:codec_lib",
-        "//source/extensions/filters/network/common/redis:supported_commands_lib",
-        "//source/extensions/filters/network/common/redis:utility_lib",
-        "//source/extensions/filters/network/redis_proxy:conn_pool_lib",
         "@envoy_api//envoy/extensions/filters/network/redis_proxy/v3:pkg_cc_proto",
         "@envoy_api//envoy/type/v3:pkg_cc_proto",
     ],
