@@ -244,12 +244,12 @@ bool PrometheusStatsFormatter::registerPrometheusNamespace(absl::string_view pro
 
 bool PrometheusStatsFormatter::unregisterPrometheusNamespace(
     absl::string_view prometheus_namespace) {
+  // Some extensions would call this from worker threads so we take lock here.
+  absl::WriterMutexLock lock(&prometheusNamespacesMutex());
   auto it = prometheusNamespaces().find(prometheus_namespace);
   if (it == prometheusNamespaces().end()) {
     return false;
   }
-  // Some extensions would call this from worker threads so we take lock here.
-  absl::WriterMutexLock lock(&prometheusNamespacesMutex());
   prometheusNamespaces().erase(it);
   return true;
 }
