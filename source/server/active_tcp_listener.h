@@ -173,9 +173,9 @@ struct ActiveTcpSocket : public Network::ListenerFilterManager,
             listener_.parent_.dispatcher().timeSource(), socket_->addressProviderSharedPtr(),
             StreamInfo::FilterState::LifeSpan::Connection)),
         inspect_buffer_(listener_.parent_.dispatcher().getWatermarkFactory().createBuffer(
-          []() -> void { /* TODO(soulxu) handle watermark*/},
-          []() -> void { /* TODO(soulxu) handle watermark*/ },
-          []() -> void { /* TODO(soulxu) handle watermark*/ })) {
+            []() -> void { /* TODO(soulxu) handle watermark*/ },
+            []() -> void { /* TODO(soulxu) handle watermark*/ },
+            []() -> void { /* TODO(soulxu) handle watermark*/ })) {
     listener_.stats_.downstream_pre_cx_active_.inc();
   }
   ~ActiveTcpSocket() override {

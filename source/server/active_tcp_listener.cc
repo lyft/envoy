@@ -135,8 +135,10 @@ void ActiveTcpSocket::onFileEvent(uint32_t events) {
   }
 
   // The ioHandle::recv method need a continuous memory space.
-  Buffer::ReservationSingleSlice reserved = inspect_buffer_->reserveSingleSlice(inspect_buffer_size_);
-  const auto result = socket_->ioHandle().recv(reserved.slice().mem_, inspect_buffer_size_, MSG_PEEK);
+  Buffer::ReservationSingleSlice reserved =
+      inspect_buffer_->reserveSingleSlice(inspect_buffer_size_);
+  const auto result =
+      socket_->ioHandle().recv(reserved.slice().mem_, inspect_buffer_size_, MSG_PEEK);
   ENVOY_LOG(trace, "recv inspect data: {}", result.rc_);
   if (!result.ok()) {
     if (result.err_->getErrorCode() == Api::IoError::IoErrorCode::Again) {
@@ -150,7 +152,8 @@ void ActiveTcpSocket::onFileEvent(uint32_t events) {
 
   Network::FilterStatus status = (*iter_)->onInspectData(*inspect_buffer_);
   if (status == Network::FilterStatus::StopIteration) {
-    if (!socket().ioHandle().isOpen() || static_cast<uint64_t>(result.rc_) >= inspect_buffer_size_) {
+    if (!socket().ioHandle().isOpen() ||
+        static_cast<uint64_t>(result.rc_) >= inspect_buffer_size_) {
       socket_->ioHandle().resetFileEvents();
       continueFilterChain(false);
     }
@@ -176,12 +179,9 @@ void ActiveTcpSocket::continueFilterChain(bool success) {
       if (inspect_buffer_size_ > 0) {
         socket_->ioHandle().resetFileEvents();
         socket_->ioHandle().initializeFileEvent(
-          listener_.parent_.dispatcher(),
-          [this](uint32_t events) {
-            onFileEvent(events);
-          },
-          Event::PlatformDefaultTriggerType,
-          Event::FileReadyType::Read | Event::FileReadyType::Closed);
+            listener_.parent_.dispatcher(), [this](uint32_t events) { onFileEvent(events); },
+            Event::PlatformDefaultTriggerType,
+            Event::FileReadyType::Read | Event::FileReadyType::Closed);
       }
     } else {
       iter_ = std::next(iter_);

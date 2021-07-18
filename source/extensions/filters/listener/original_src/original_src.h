@@ -24,7 +24,10 @@ public:
   Network::FilterStatus onAccept(Network::ListenerFilterCallbacks& cb) override;
 
   // TODO (soulxu) implememnt this instead of filter peek data by itself.
-  Network::FilterStatus onInspectData(Buffer::Instance&) override { return Network::FilterStatus::Continue; };
+  Network::FilterStatus onInspectData(Buffer::Instance&) override {
+    return Network::FilterStatus::Continue;
+  };
+
 private:
   Config config_;
 };

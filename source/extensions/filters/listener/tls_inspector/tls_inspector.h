@@ -78,9 +78,8 @@ public:
 
   Network::FilterStatus onInspectData(Buffer::Instance& buffer) override;
 
-  size_t inspectSize() override {
-    return config_->maxClientHelloSize();
-  }
+  size_t inspectSize() override { return config_->maxClientHelloSize(); }
+
 private:
   ParseState parseClientHello(const void* data, size_t len);
   void onALPN(const unsigned char* data, unsigned int len);
