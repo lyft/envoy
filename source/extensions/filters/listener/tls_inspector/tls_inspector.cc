@@ -72,22 +72,22 @@ Filter::Filter(const ConfigSharedPtr config) : config_(config), ssl_(config_->ne
 Network::FilterStatus Filter::onInspectData(Buffer::Instance& buffer) {
   if (buffer.length() > read_) {
     // Although the underlay using single slice, but the filter shouldn't assume
-    // the underlayer implementation. So using the linearize to get a continuous
+    // the underlay implementation. So using the linearize to get a continuous
     // memory space.
     const uint8_t* data = static_cast<uint8_t*>(buffer.linearize(buffer.length())) + read_;
     const size_t len = buffer.length() - read_;
     read_ = buffer.length();
     ParseState parse_state = parseClientHello(data, len);
     switch (parse_state) {
-      case ParseState::Error:
-        cb_->socket().ioHandle().close();
-        return Network::FilterStatus::StopIteration;
-      case ParseState::Done:
-        // finish the inspect
-        return Network::FilterStatus::Continue;
-      case ParseState::Continue:
-        // do nothing but wait for the next event
-        return Network::FilterStatus::StopIteration;
+    case ParseState::Error:
+      cb_->socket().ioHandle().close();
+      return Network::FilterStatus::StopIteration;
+    case ParseState::Done:
+      // finish the inspect
+      return Network::FilterStatus::Continue;
+    case ParseState::Continue:
+      // do nothing but wait for the next event
+      return Network::FilterStatus::StopIteration;
     }
   }
   return Network::FilterStatus::StopIteration;
