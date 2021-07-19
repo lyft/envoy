@@ -6,13 +6,12 @@
 #include "envoy/http/async_client.h"
 #include "envoy/http/message.h"
 
-#include "common/common/macros.h"
-#include "common/http/message_impl.h"
-#include "common/protobuf/message_validator_impl.h"
-#include "common/protobuf/utility.h"
-#include "common/secret/secret_manager_impl.h"
-
-#include "extensions/filters/http/oauth2/filter.h"
+#include "source/common/common/macros.h"
+#include "source/common/http/message_impl.h"
+#include "source/common/protobuf/message_validator_impl.h"
+#include "source/common/protobuf/utility.h"
+#include "source/common/secret/secret_manager_impl.h"
+#include "source/extensions/filters/http/oauth2/filter.h"
 
 #include "test/mocks/http/mocks.h"
 #include "test/mocks/server/mocks.h"
@@ -115,7 +114,7 @@ public:
     p.add_resources("https://example.com");
     auto* matcher = p.add_pass_through_matcher();
     matcher->set_name(":method");
-    matcher->set_exact_match("OPTIONS");
+    matcher->mutable_string_match()->set_exact("OPTIONS");
     auto credentials = p.mutable_credentials();
     credentials->set_client_id(TEST_CLIENT_ID);
     credentials->mutable_token_secret()->set_name("secret");
@@ -258,7 +257,7 @@ TEST_F(OAuth2Test, DefaultAuthScope) {
   p.set_forward_bearer_token(true);
   auto* matcher = p.add_pass_through_matcher();
   matcher->set_name(":method");
-  matcher->set_exact_match("OPTIONS");
+  matcher->mutable_string_match()->set_exact("OPTIONS");
 
   auto credentials = p.mutable_credentials();
   credentials->set_client_id(TEST_CLIENT_ID);

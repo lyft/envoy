@@ -1,4 +1,4 @@
-#include "server/listener_impl.h"
+#include "source/server/listener_impl.h"
 
 #include "envoy/config/core/v3/base.pb.h"
 #include "envoy/config/listener/v3/listener.pb.h"
@@ -10,64 +10,41 @@
 #include "envoy/server/transport_socket_config.h"
 #include "envoy/stats/scope.h"
 
-#include "common/access_log/access_log_impl.h"
-#include "common/api/os_sys_calls_impl.h"
-#include "common/common/assert.h"
-#include "common/config/utility.h"
-#include "common/network/connection_balancer_impl.h"
-#include "common/network/resolver_impl.h"
-#include "common/network/socket_option_factory.h"
-#include "common/network/socket_option_impl.h"
-#include "common/network/udp_listener_impl.h"
-#include "common/network/udp_packet_writer_handler_impl.h"
-#include "common/network/utility.h"
-#include "common/protobuf/utility.h"
-#include "common/runtime/runtime_features.h"
+#include "source/common/access_log/access_log_impl.h"
+#include "source/common/api/os_sys_calls_impl.h"
+#include "source/common/common/assert.h"
+#include "source/common/config/utility.h"
+#include "source/common/network/connection_balancer_impl.h"
+#include "source/common/network/resolver_impl.h"
+#include "source/common/network/socket_option_factory.h"
+#include "source/common/network/socket_option_impl.h"
+#include "source/common/network/udp_listener_impl.h"
+#include "source/common/network/udp_packet_writer_handler_impl.h"
+#include "source/common/network/utility.h"
+#include "source/common/protobuf/utility.h"
+#include "source/common/runtime/runtime_features.h"
+#include "source/server/active_raw_udp_listener_config.h"
+#include "source/server/configuration_impl.h"
+#include "source/server/drain_manager_impl.h"
+#include "source/server/filter_chain_manager_impl.h"
+#include "source/server/listener_manager_impl.h"
+#include "source/server/transport_socket_config_impl.h"
 
-#include "server/active_raw_udp_listener_config.h"
-#include "server/configuration_impl.h"
-#include "server/drain_manager_impl.h"
-#include "server/filter_chain_manager_impl.h"
-#include "server/listener_manager_impl.h"
-#include "server/transport_socket_config_impl.h"
-
-#include "extensions/filters/listener/well_known_names.h"
-
-#if defined(ENVOY_ENABLE_QUIC)
-#include "common/quic/active_quic_listener.h"
-#include "common/quic/udp_gso_batch_writer.h"
+#ifdef ENVOY_ENABLE_QUIC
+#include "source/common/quic/active_quic_listener.h"
+#include "source/common/quic/udp_gso_batch_writer.h"
 #endif
 
 namespace Envoy {
 namespace Server {
 
 namespace {
+
 bool anyFilterChain(
     const envoy::config::listener::v3::Listener& config,
     std::function<bool(const envoy::config::listener::v3::FilterChain&)> predicate) {
   return (config.has_default_filter_chain() && predicate(config.default_filter_chain())) ||
          std::any_of(config.filter_chains().begin(), config.filter_chains().end(), predicate);
-}
-
-bool needTlsInspector(const envoy::config::listener::v3::Listener& config) {
-  if (Runtime::runtimeFeatureEnabled("envoy.reloadable_features.disable_tls_inspector_injection")) {
-    return false;
-  }
-  return anyFilterChain(config,
-                        [](const auto& filter_chain) {
-                          const auto& matcher = filter_chain.filter_chain_match();
-                          return matcher.transport_protocol() == "tls" ||
-                                 (matcher.transport_protocol().empty() &&
-                                  (!matcher.server_names().empty() ||
-                                   !matcher.application_protocols().empty()));
-                        }) &&
-         !std::any_of(
-             config.listener_filters().begin(), config.listener_filters().end(),
-             [](const auto& filter) {
-               return filter.name() ==
-                          Extensions::ListenerFilters::ListenerFilterNames::get().TlsInspector ||
-                      filter.name() == "envoy.listener.tls_inspector";
-             });
 }
 
 bool usesProxyProto(const envoy::config::listener::v3::Listener& config) {
@@ -289,15 +266,17 @@ ListenerImpl::ListenerImpl(const envoy::config::listener::v3::Listener& config,
       open_connections_(std::make_shared<BasicResourceLimitImpl>(
           std::numeric_limits<uint64_t>::max(), listener_factory_context_->runtime(),
           cx_limit_runtime_key_)),
-      local_init_watcher_(fmt::format("Listener-local-init-watcher {}", name), [this] {
-        if (workers_started_) {
-          parent_.onListenerWarmed(*this);
-        } else {
-          // Notify Server that this listener is
-          // ready.
-          listener_init_target_.ready();
-        }
-      }) {
+      local_init_watcher_(fmt::format("Listener-local-init-watcher {}", name),
+                          [this] {
+                            if (workers_started_) {
+                              parent_.onListenerWarmed(*this);
+                            } else {
+                              // Notify Server that this listener is
+                              // ready.
+                              listener_init_target_.ready();
+                            }
+                          }),
+      quic_stat_names_(parent_.quicStatNames()) {
 
   const absl::optional<std::string> runtime_val =
       listener_factory_context_->runtime().snapshot().get(cx_limit_runtime_key_);
@@ -319,7 +298,6 @@ ListenerImpl::ListenerImpl(const envoy::config::listener::v3::Listener& config,
     buildSocketOptions();
     buildOriginalDstListenerFilter();
     buildProxyProtocolListenerFilter();
-    buildTlsInspectorListenerFilter();
   }
   if (!workers_started_) {
     // Initialize dynamic_init_manager_ from Server's init manager if it's not initialized.
@@ -360,10 +338,12 @@ ListenerImpl::ListenerImpl(ListenerImpl& origin,
           origin.listener_factory_context_->listener_factory_context_base_, this, *this)),
       filter_chain_manager_(address_, origin.listener_factory_context_->parentFactoryContext(),
                             initManager(), origin.filter_chain_manager_),
-      local_init_watcher_(fmt::format("Listener-local-init-watcher {}", name), [this] {
-        ASSERT(workers_started_);
-        parent_.inPlaceFilterChainUpdate(*this);
-      }) {
+      local_init_watcher_(fmt::format("Listener-local-init-watcher {}", name),
+                          [this] {
+                            ASSERT(workers_started_);
+                            parent_.inPlaceFilterChainUpdate(*this);
+                          }),
+      quic_stat_names_(parent_.quicStatNames()) {
   buildAccessLog();
   auto socket_type = Network::Utility::protobufAddressSocketType(config.address());
   buildListenSocketOptions(socket_type);
@@ -375,7 +355,6 @@ ListenerImpl::ListenerImpl(ListenerImpl& origin,
   buildSocketOptions();
   buildOriginalDstListenerFilter();
   buildProxyProtocolListenerFilter();
-  buildTlsInspectorListenerFilter();
   open_connections_ = origin.open_connections_;
 }
 
@@ -401,9 +380,9 @@ void ListenerImpl::buildUdpListenerFactory(Network::Socket::Type socket_type,
 
   udp_listener_config_ = std::make_unique<UdpListenerConfigImpl>(config_.udp_listener_config());
   if (config_.udp_listener_config().has_quic_options()) {
-#if defined(ENVOY_ENABLE_QUIC)
+#ifdef ENVOY_ENABLE_QUIC
     udp_listener_config_->listener_factory_ = std::make_unique<Quic::ActiveQuicListenerFactory>(
-        config_.udp_listener_config().quic_options(), concurrency);
+        config_.udp_listener_config().quic_options(), concurrency, quic_stat_names_);
 #if UDP_GSO_BATCH_WRITER_COMPILETIME_SUPPORT
     // TODO(mattklein123): We should be able to use GSO without QUICHE/QUIC. Right now this causes
     // non-QUIC integration tests to fail, which I haven't investigated yet. Additionally, from
@@ -542,7 +521,7 @@ void ListenerImpl::buildOriginalDstListenerFilter() {
   if (PROTOBUF_GET_WRAPPED_OR_DEFAULT(config_, use_original_dst, false)) {
     auto& factory =
         Config::Utility::getAndCheckFactoryByName<Configuration::NamedListenerFilterConfigFactory>(
-            Extensions::ListenerFilters::ListenerFilterNames::get().OriginalDst);
+            "envoy.filters.listener.original_dst");
 
     listener_filter_factories_.push_back(factory.createListenerFilterFactoryFromProto(
         Envoy::ProtobufWkt::Empty(),
@@ -558,30 +537,9 @@ void ListenerImpl::buildProxyProtocolListenerFilter() {
   if (usesProxyProto(config_)) {
     auto& factory =
         Config::Utility::getAndCheckFactoryByName<Configuration::NamedListenerFilterConfigFactory>(
-            Extensions::ListenerFilters::ListenerFilterNames::get().ProxyProtocol);
+            "envoy.filters.listener.proxy_protocol");
     listener_filter_factories_.push_back(factory.createListenerFilterFactoryFromProto(
         envoy::extensions::filters::listener::proxy_protocol::v3::ProxyProtocol(),
-        /*listener_filter_matcher=*/nullptr, *listener_factory_context_));
-  }
-}
-
-void ListenerImpl::buildTlsInspectorListenerFilter() {
-  // TODO(zuercher) remove the deprecated TLS inspector name when the deprecated names are removed.
-  const bool need_tls_inspector = needTlsInspector(config_);
-  // Automatically inject TLS Inspector if it wasn't configured explicitly and it's needed.
-  if (need_tls_inspector) {
-    const std::string message =
-        fmt::format("adding listener '{}': filter chain match rules require TLS Inspector "
-                    "listener filter, but it isn't configured, trying to inject it "
-                    "(this might fail if Envoy is compiled without it)",
-                    address_->asString());
-    ENVOY_LOG(warn, "{}", message);
-
-    auto& factory =
-        Config::Utility::getAndCheckFactoryByName<Configuration::NamedListenerFilterConfigFactory>(
-            Extensions::ListenerFilters::ListenerFilterNames::get().TlsInspector);
-    listener_filter_factories_.push_back(factory.createListenerFilterFactoryFromProto(
-        Envoy::ProtobufWkt::Empty(),
         /*listener_filter_matcher=*/nullptr, *listener_factory_context_));
   }
 }
@@ -742,11 +700,6 @@ bool ListenerImpl::supportUpdateFilterChain(const envoy::config::listener::v3::L
 
   // See buildProxyProtocolListenerFilter().
   if (usesProxyProto(config_) ^ usesProxyProto(config)) {
-    return false;
-  }
-
-  // See buildTlsInspectorListenerFilter().
-  if (needTlsInspector(config_) ^ needTlsInspector(config)) {
     return false;
   }
   return ListenerMessageUtil::filterChainOnlyChange(config_, config);

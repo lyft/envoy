@@ -8,6 +8,7 @@ Version history
 
   current
   v1.18.3
+  v1.19.0
   v1.18.2
   v1.18.1
   v1.18.0
