@@ -13,7 +13,7 @@ getting your Envoy proxy up and running.
 Install Envoy on Debian GNU/Linux
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-You can `install Envoy on Debian using Get Envoy <https://cloudsmith.io/~tetrate/repos/getenvoy-deb-stable/setup/#formats-deb>`_
+You can `install Envoy on Debian using packages created by Tetrate <https://cloudsmith.io/~tetrate/repos/getenvoy-deb-stable/setup/#formats-deb>`_
 until `official packages exist <https://github.com/envoyproxy/envoy/issues/16867>`_.
 
 .. code-block:: console
@@ -28,7 +28,7 @@ until `official packages exist <https://github.com/envoyproxy/envoy/issues/16867
 Install Envoy on Ubuntu Linux
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-You can `install Envoy on Ubuntu using Get Envoy <https://cloudsmith.io/~tetrate/repos/getenvoy-deb-stable/setup/#formats-deb>`_
+You can `install Envoy on Ubuntu using packages created by Tetrate <https://cloudsmith.io/~tetrate/repos/getenvoy-deb-stable/setup/#formats-deb>`_
 until `official packages exist <https://github.com/envoyproxy/envoy/issues/16867>`_.
 
 .. code-block:: console
@@ -43,7 +43,7 @@ until `official packages exist <https://github.com/envoyproxy/envoy/issues/16867
 Install Envoy on RPM-based distros
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-You can install Envoy on Centos/Redhat Enterprise Linux (RHEL) using `Get Envoy <https://cloudsmith.io/~tetrate/repos/getenvoy-rpm-stable/setup/#formats-rpm>`_
+You can install Envoy on Centos/Redhat Enterprise Linux (RHEL) using `packages created by Tetrate <https://cloudsmith.io/~tetrate/repos/getenvoy-rpm-stable/setup/#formats-rpm>`_
 until `official packages exist <https://github.com/envoyproxy/envoy/issues/16867>`_.
 
 .. code-block:: console
