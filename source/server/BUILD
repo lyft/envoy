@@ -64,9 +64,9 @@ envoy_cc_library(
 envoy_cc_library(
     name = "connection_handler_lib",
     deps = [
-        "//source/server:active_tcp_listener",
-        "//source/server:active_udp_listener",
-        "//source/server:connection_handler_impl",
+        ":active_tcp_listener",
+        ":active_udp_listener",
+        ":connection_handler_impl",
     ],
 )
 
@@ -117,6 +117,7 @@ envoy_cc_library(
         "active_tcp_listener.h",
     ],
     deps = [
+        ":active_tcp_socket",
         "//envoy/common:time_interface",
         "//envoy/event:deferred_deletable",
         "//envoy/event:dispatcher_interface",
@@ -155,6 +156,35 @@ envoy_cc_library(
         "//envoy/network:listener_interface",
         "//envoy/server:listener_manager_interface",
         "//source/server:connection_handler_impl",
+    ],
+)
+
+envoy_cc_library(
+    name = "active_tcp_socket",
+    srcs = ["active_tcp_socket.cc"],
+    hdrs = [
+        "active_tcp_socket.h",
+    ],
+    deps = [
+        ":active_listener_base",
+        "//envoy/common:time_interface",
+        "//envoy/event:deferred_deletable",
+        "//envoy/event:dispatcher_interface",
+        "//envoy/event:timer_interface",
+        "//envoy/network:connection_handler_interface",
+        "//envoy/network:connection_interface",
+        "//envoy/network:exception_interface",
+        "//envoy/network:filter_interface",
+        "//envoy/network:listen_socket_interface",
+        "//envoy/network:listener_interface",
+        "//envoy/server:listener_manager_interface",
+        "//envoy/stats:timespan_interface",
+        "//source/common/common:linked_object",
+        "//source/common/common:non_copyable",
+        "//source/common/event:deferred_task",
+        "//source/common/network:connection_lib",
+        "//source/common/stats:timespan_lib",
+        "//source/common/stream_info:stream_info_lib",
     ],
 )
 
