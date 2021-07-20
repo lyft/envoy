@@ -9,6 +9,7 @@
 #include "envoy/network/listen_socket.h"
 #include "envoy/network/socket.h"
 #include "envoy/network/socket_interface.h"
+#include "envoy/server/overload/thread_local_overload_state.h"
 
 #include "source/common/common/assert.h"
 #include "source/common/common/dump_state_utils.h"
@@ -193,12 +194,19 @@ protected:
 class AcceptedSocketImpl : public ConnectionSocketImpl {
 public:
   AcceptedSocketImpl(IoHandlePtr&& io_handle, const Address::InstanceConstSharedPtr& local_address,
-                     const Address::InstanceConstSharedPtr& remote_address)
-      : ConnectionSocketImpl(std::move(io_handle), local_address, remote_address) {
+                     const Address::InstanceConstSharedPtr& remote_address,
+                     Server::ThreadLocalOverloadState& overload_state)
+      : ConnectionSocketImpl(std::move(io_handle), local_address, remote_address),
+        overload_state_(overload_state) {
     ++global_accepted_socket_count_;
   }
 
   ~AcceptedSocketImpl() override {
+    if (overload_state_.isResourceMonitorEnabled(
+            Server::OverloadProactiveResourceName::GlobalDownstreamMaxConnections)) {
+      overload_state_.tryDeallocateResource(
+          Server::OverloadProactiveResourceName::GlobalDownstreamMaxConnections, 1);
+    }
     ASSERT(global_accepted_socket_count_.load() > 0);
     --global_accepted_socket_count_;
   }
@@ -208,6 +216,7 @@ public:
   static uint64_t acceptedSocketCount() { return global_accepted_socket_count_.load(); }
 
 private:
+  Server::ThreadLocalOverloadState& overload_state_;
   static std::atomic<uint64_t> global_accepted_socket_count_;
 };
 

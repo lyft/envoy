@@ -10,6 +10,7 @@
 
 #include "source/common/stats/isolated_store_impl.h"
 #include "source/extensions/resource_monitors/common/factory_base.h"
+#include "source/extensions/resource_monitors/downstream_connections/downstream_connections_monitor.h"
 #include "source/server/overload_manager_impl.h"
 
 #include "test/common/stats/stat_test_utility.h"
@@ -43,7 +44,6 @@ namespace Server {
 namespace {
 
 using TimerType = Event::ScaledTimerType;
-
 class FakeResourceMonitor : public ResourceMonitor {
 public:
   FakeResourceMonitor(Event::Dispatcher& dispatcher) : dispatcher_(dispatcher), response_(0.0) {}
@@ -57,7 +57,7 @@ public:
     update_async_ = new_update_async;
   }
 
-  void updateResourceUsage(ResourceMonitor::Callbacks& callbacks) override {
+  void updateResourceUsage(ResourceUpdateCallbacks& callbacks) override {
     if (update_async_) {
       callbacks_.emplace(callbacks);
     } else {
@@ -74,7 +74,7 @@ public:
   }
 
 private:
-  void publishUpdate(ResourceMonitor::Callbacks& callbacks) {
+  void publishUpdate(ResourceUpdateCallbacks& callbacks) {
     if (absl::holds_alternative<double>(response_)) {
       Server::ResourceUsage usage;
       usage.resource_pressure_ = absl::get<double>(response_);
@@ -88,7 +88,37 @@ private:
   Event::Dispatcher& dispatcher_;
   absl::variant<double, EnvoyException> response_;
   bool update_async_ = false;
-  absl::optional<std::reference_wrapper<ResourceMonitor::Callbacks>> callbacks_;
+  absl::optional<std::reference_wrapper<ResourceUpdateCallbacks>> callbacks_;
+};
+
+template <class ConfigType>
+class FakeProactiveResourceMonitorFactory
+    : public Server::Configuration::ProactiveResourceMonitorFactory {
+public:
+  FakeProactiveResourceMonitorFactory(const std::string& name) : monitor_(nullptr), name_(name) {}
+
+  Server::ProactiveResourceMonitorPtr
+  createProactiveResourceMonitor(const Protobuf::Message&,
+                                 Server::Configuration::ResourceMonitorFactoryContext&) override {
+
+    config_.set_max_active_downstream_connections(3);
+    auto monitor = std::make_unique<Extensions::ResourceMonitors::DownstreamConnections::
+                                        ActiveDownstreamConnectionsResourceMonitor>(config_);
+    monitor_ = monitor.get();
+    return monitor;
+  }
+
+  ProtobufTypes::MessagePtr createEmptyConfigProto() override {
+    return ProtobufTypes::MessagePtr{new ConfigType()};
+  }
+
+  std::string name() const override { return name_; }
+
+  Extensions::ResourceMonitors::DownstreamConnections::ActiveDownstreamConnectionsResourceMonitor*
+      monitor_; // not owned
+  envoy::extensions::resource_monitors::downstream_connections::v3::DownstreamConnectionsConfig
+      config_;
+  const std::string name_;
 };
 
 template <class ConfigType>
@@ -146,8 +176,10 @@ protected:
       : factory1_("envoy.resource_monitors.fake_resource1"),
         factory2_("envoy.resource_monitors.fake_resource2"),
         factory3_("envoy.resource_monitors.fake_resource3"),
-        factory4_("envoy.resource_monitors.fake_resource4"), register_factory1_(factory1_),
-        register_factory2_(factory2_), register_factory3_(factory3_), register_factory4_(factory4_),
+        factory4_("envoy.resource_monitors.fake_resource4"),
+        factory5_("envoy.resource_monitors.global_downstream_max_connections"),
+        register_factory1_(factory1_), register_factory2_(factory2_), register_factory3_(factory3_),
+        register_factory4_(factory4_), register_factory5_(factory5_),
         api_(Api::createApiForTest(stats_)) {}
 
   void setDispatcherExpectation() {
@@ -174,10 +206,12 @@ protected:
   FakeResourceMonitorFactory<Envoy::ProtobufWkt::Timestamp> factory2_;
   FakeResourceMonitorFactory<Envoy::ProtobufWkt::Timestamp> factory3_;
   FakeResourceMonitorFactory<Envoy::ProtobufWkt::Timestamp> factory4_;
+  FakeProactiveResourceMonitorFactory<Envoy::ProtobufWkt::Timestamp> factory5_;
   Registry::InjectFactory<Configuration::ResourceMonitorFactory> register_factory1_;
   Registry::InjectFactory<Configuration::ResourceMonitorFactory> register_factory2_;
   Registry::InjectFactory<Configuration::ResourceMonitorFactory> register_factory3_;
   Registry::InjectFactory<Configuration::ResourceMonitorFactory> register_factory4_;
+  Registry::InjectFactory<Configuration::ProactiveResourceMonitorFactory> register_factory5_;
   NiceMock<Event::MockDispatcher> dispatcher_;
   NiceMock<Event::MockTimer>* timer_; // not owned
   Stats::TestUtil::TestStore stats_;
@@ -196,6 +230,7 @@ constexpr char kRegularStateConfig[] = R"YAML(
     - name: envoy.resource_monitors.fake_resource2
     - name: envoy.resource_monitors.fake_resource3
     - name: envoy.resource_monitors.fake_resource4
+    - name: envoy.resource_monitors.global_downstream_max_connections
   actions:
     - name: envoy.overload_actions.dummy_action
       triggers:
@@ -698,6 +733,30 @@ TEST_F(OverloadManagerImplTest, Shutdown) {
   manager->start();
 
   EXPECT_CALL(*timer_, disableTimer());
+  manager->stop();
+}
+
+TEST_F(OverloadManagerImplTest, ProactiveResourceAllocateAndDeallocateResourceTest) {
+  setDispatcherExpectation();
+  auto manager(createOverloadManager(kRegularStateConfig));
+  Stats::Counter& failed_updates =
+      stats_.counter("overload.envoy.resource_monitors.global_downstream_max_connections."
+                     "failed_updates");
+  manager->start();
+  bool resource_allocated = manager->getThreadLocalOverloadState().tryAllocateResource(
+      Server::OverloadProactiveResourceName::GlobalDownstreamMaxConnections, 1);
+  EXPECT_EQ(true, resource_allocated);
+  resource_allocated = manager->getThreadLocalOverloadState().tryAllocateResource(
+      Server::OverloadProactiveResourceName::GlobalDownstreamMaxConnections, 3);
+  EXPECT_EQ(false, resource_allocated);
+  EXPECT_EQ(1, failed_updates.value());
+
+  bool resource_deallocated = manager->getThreadLocalOverloadState().tryDeallocateResource(
+      Server::OverloadProactiveResourceName::GlobalDownstreamMaxConnections, 1);
+  EXPECT_EQ(true, resource_deallocated);
+  EXPECT_DEATH(manager->getThreadLocalOverloadState().tryDeallocateResource(
+                   Server::OverloadProactiveResourceName::GlobalDownstreamMaxConnections, 1),
+               ".*Cannot deallocate resource, current resource usage is lower than decrement.*");
   manager->stop();
 }
 

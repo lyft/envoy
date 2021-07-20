@@ -66,6 +66,7 @@ private:
   Api::Api& api_;
   Thread::ThreadPtr thread_;
   WatchDogSharedPtr watch_dog_;
+  Server::OverloadManager& overload_manager_;
 };
 
 } // namespace Server

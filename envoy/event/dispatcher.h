@@ -23,6 +23,7 @@
 #include "envoy/network/listen_socket.h"
 #include "envoy/network/listener.h"
 #include "envoy/network/transport_socket.h"
+#include "envoy/server/overload/thread_local_overload_state.h"
 #include "envoy/server/watchdog.h"
 #include "envoy/stats/scope.h"
 #include "envoy/stats/stats_macros.h"
@@ -244,9 +245,10 @@ public:
    * @param backlog_size controls listener pending connections backlog
    * @return Network::ListenerPtr a new listener that is owned by the caller.
    */
-  virtual Network::ListenerPtr createListener(Network::SocketSharedPtr&& socket,
-                                              Network::TcpListenerCallbacks& cb, bool bind_to_port,
-                                              uint32_t backlog_size) PURE;
+  virtual Network::ListenerPtr
+  createListener(Network::SocketSharedPtr&& socket, Network::TcpListenerCallbacks& cb,
+                 bool bind_to_port, uint32_t backlog_size,
+                 Server::ThreadLocalOverloadState& overload_state) PURE;
 
   /**
    * Creates a logical udp listener on a specific port.

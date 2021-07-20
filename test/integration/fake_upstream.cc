@@ -515,7 +515,9 @@ FakeUpstream::FakeUpstream(Network::TransportSocketFactoryPtr&& transport_socket
       read_disable_on_new_connection_(true), enable_half_close_(config.enable_half_close_),
       listener_(*this, http_type_ == Http::CodecType::HTTP3),
       filter_chain_(Network::Test::createEmptyFilterChain(std::move(transport_socket_factory))),
-      stats_scope_(stats_store_.createScope("test_server_scope")) {
+      stats_scope_(stats_store_.createScope("test_server_scope")),
+      overload_state_(std::make_unique<FakeThreadLocalOverloadState>(
+          FakeThreadLocalOverloadState(*dispatcher_))) {
   ENVOY_LOG(info, "starting fake server at {}. UDP={} codec={}", localAddress()->asString(),
             config.udp_fake_upstream_.has_value(), FakeHttpConnection::typeToString(http_type_));
   if (config.udp_fake_upstream_.has_value() &&
@@ -571,7 +573,7 @@ void FakeUpstream::createUdpListenerFilterChain(Network::UdpListenerFilterManage
 }
 
 void FakeUpstream::threadRoutine() {
-  handler_->addListener(absl::nullopt, listener_);
+  handler_->addListener(absl::nullopt, listener_, *overload_state_);
   server_initialized_.setReady();
   dispatcher_->run(Event::Dispatcher::RunType::Block);
   handler_.reset();

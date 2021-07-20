@@ -20,25 +20,36 @@ namespace Network {
 const absl::string_view TcpListenerImpl::GlobalMaxCxRuntimeKey =
     "overload.global_downstream_max_connections";
 
+// TODO(nezdolik) clean up this method once downstream connections limit runtime key is fully
+// deprecated.
 bool TcpListenerImpl::rejectCxOverGlobalLimit() {
-  // Enforce the global connection limit if necessary, immediately closing the accepted connection.
   Runtime::Loader* runtime = Runtime::LoaderSingleton::getExisting();
-
-  if (runtime == nullptr) {
-    // The runtime singleton won't exist in most unit tests that do not need global downstream limit
-    // enforcement. Therefore, there is no need to enforce limits if the singleton doesn't exist.
-    // TODO(tonya11en): Revisit this once runtime is made globally available.
+  // If downstream connections limit is configured via runtime variable and overload manager, prefer
+  // overload manager config.
+  if (runtime != nullptr &&
+      overload_state_.isResourceMonitorEnabled(
+          Server::OverloadProactiveResourceName::GlobalDownstreamMaxConnections) &&
+      runtime->threadsafeSnapshot()->get(Network::TcpListenerImpl::GlobalMaxCxRuntimeKey)) {
+    ENVOY_LOG_MISC(warn,
+                   "Global downstream connections limits is configured via runtime key {} and in "
+                   "overload manager. Using overload manager config.",
+                   TcpListenerImpl::GlobalMaxCxRuntimeKey);
+    return !(overload_state_.tryAllocateResource(
+        Server::OverloadProactiveResourceName::GlobalDownstreamMaxConnections, 1));
+  } else if (overload_state_.isResourceMonitorEnabled(
+                 Server::OverloadProactiveResourceName::GlobalDownstreamMaxConnections)) {
+    // If runtime key for downstream connections limit is not specified, use overload manager config
+    // instead.
+    return !(overload_state_.tryAllocateResource(
+        Server::OverloadProactiveResourceName::GlobalDownstreamMaxConnections, 1));
+  } else if (runtime != nullptr) {
+    const uint64_t global_cx_limit = runtime->threadsafeSnapshot()->getInteger(
+        GlobalMaxCxRuntimeKey, std::numeric_limits<uint64_t>::max());
+    return AcceptedSocketImpl::acceptedSocketCount() >= global_cx_limit;
+  } else {
+    // Pass-through mode if both runtime and resource monitor are not available.
     return false;
   }
-
-  // If the connection limit is not set, don't limit the connections, but still track them.
-  // TODO(tonya11en): In integration tests, threadsafeSnapshot is necessary since the FakeUpstreams
-  // use a listener and do not run in a worker thread. In practice, this code path will always be
-  // run on a worker thread, but to prevent failed assertions in test environments, threadsafe
-  // snapshots must be used. This must be revisited.
-  const uint64_t global_cx_limit = runtime->threadsafeSnapshot()->getInteger(
-      GlobalMaxCxRuntimeKey, std::numeric_limits<uint64_t>::max());
-  return AcceptedSocketImpl::acceptedSocketCount() >= global_cx_limit;
 }
 
 void TcpListenerImpl::onSocketEvent(short flags) {
@@ -91,8 +102,8 @@ void TcpListenerImpl::onSocketEvent(short flags) {
                                                   local_address->ip()->version() ==
                                                       Address::IpVersion::v6);
 
-    cb_.onAccept(
-        std::make_unique<AcceptedSocketImpl>(std::move(io_handle), local_address, remote_address));
+    cb_.onAccept(std::make_unique<AcceptedSocketImpl>(std::move(io_handle), local_address,
+                                                      remote_address, overload_state_));
   }
 }
 
@@ -116,9 +127,11 @@ void TcpListenerImpl::setupServerSocket(Event::DispatcherImpl& dispatcher, Socke
 
 TcpListenerImpl::TcpListenerImpl(Event::DispatcherImpl& dispatcher, Random::RandomGenerator& random,
                                  SocketSharedPtr socket, TcpListenerCallbacks& cb,
-                                 bool bind_to_port, uint32_t backlog_size)
+                                 bool bind_to_port, uint32_t backlog_size,
+                                 Server::ThreadLocalOverloadState& overload_state)
     : BaseListenerImpl(dispatcher, std::move(socket)), cb_(cb), backlog_size_(backlog_size),
-      random_(random), bind_to_port_(bind_to_port), reject_fraction_(0.0) {
+      random_(random), bind_to_port_(bind_to_port), reject_fraction_(0.0),
+      overload_state_(overload_state) {
   if (bind_to_port) {
     setupServerSocket(dispatcher, *socket_);
   }

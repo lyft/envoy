@@ -5,6 +5,8 @@
 #include "envoy/server/resource_monitor.h"
 #include "envoy/server/resource_monitor_config.h"
 
+#include "source/extensions/resource_monitors/downstream_connections/downstream_connections_monitor.h"
+
 #include "test/common/config/dummy_config.pb.h"
 #include "test/integration/http_protocol_integration.h"
 #include "test/integration/ssl_utility.h"
@@ -25,7 +27,7 @@ public:
   FakeResourceMonitor(Event::Dispatcher& dispatcher, FakeResourceMonitorFactory& factory)
       : dispatcher_(dispatcher), factory_(factory), pressure_(0.0) {}
   ~FakeResourceMonitor() override;
-  void updateResourceUsage(Callbacks& callbacks) override;
+  void updateResourceUsage(Server::ResourceUpdateCallbacks& callbacks) override;
 
   void setResourcePressure(double pressure) {
     dispatcher_.post([this, pressure] { pressure_ = pressure; });
@@ -58,9 +60,38 @@ private:
   FakeResourceMonitor* monitor_{nullptr};
 };
 
+template <class ConfigType>
+class FakeProactiveResourceMonitorFactory
+    : public Server::Configuration::ProactiveResourceMonitorFactory {
+public:
+  FakeProactiveResourceMonitorFactory(const std::string& name) : monitor_(nullptr), name_(name) {}
+
+  Server::ProactiveResourceMonitorPtr
+  createProactiveResourceMonitor(const Protobuf::Message&,
+                                 Server::Configuration::ResourceMonitorFactoryContext&) override {
+    config_.set_max_active_downstream_connections(8);
+    auto monitor = std::make_unique<Extensions::ResourceMonitors::DownstreamConnections::
+                                        ActiveDownstreamConnectionsResourceMonitor>(config_);
+    monitor_ = monitor.get();
+    return monitor;
+  }
+
+  ProtobufTypes::MessagePtr createEmptyConfigProto() override {
+    return ProtobufTypes::MessagePtr{new ConfigType()};
+  }
+
+  std::string name() const override { return name_; }
+
+  Extensions::ResourceMonitors::DownstreamConnections::ActiveDownstreamConnectionsResourceMonitor*
+      monitor_; // not owned
+  envoy::extensions::resource_monitors::downstream_connections::v3::DownstreamConnectionsConfig
+      config_;
+  const std::string name_;
+};
+
 FakeResourceMonitor::~FakeResourceMonitor() { factory_.onMonitorDestroyed(this); }
 
-void FakeResourceMonitor::updateResourceUsage(Callbacks& callbacks) {
+void FakeResourceMonitor::updateResourceUsage(Server::ResourceUpdateCallbacks& callbacks) {
   Server::ResourceUsage usage;
   usage.resource_pressure_ = pressure_;
   callbacks.onSuccess(usage);
@@ -79,6 +110,7 @@ Server::ResourceMonitorPtr FakeResourceMonitorFactory::createResourceMonitor(
 }
 
 class OverloadIntegrationTest : public HttpProtocolIntegrationTest {
+
 protected:
   void
   initializeOverloadManager(const envoy::config::overload::v3::OverloadAction& overload_action) {
@@ -377,8 +409,8 @@ TEST_P(OverloadScaledTimerIntegrationTest, CloseIdleHttpStream) {
 }
 
 TEST_P(OverloadScaledTimerIntegrationTest, TlsHandshakeTimeout) {
-  // Set up the Envoy to expect a TLS connection, with a 20 second timeout that can scale down to 5
-  // seconds.
+  // Set up the Envoy to expect a TLS connection, with a 20 second timeout that can scale down to
+  // 5 seconds.
   config_helper_.addSslConfig();
   config_helper_.addConfigModifier([&](envoy::config::bootstrap::v3::Bootstrap& bootstrap) -> void {
     auto* filter_chain =
@@ -394,8 +426,8 @@ TEST_P(OverloadScaledTimerIntegrationTest, TlsHandshakeTimeout) {
           min_timeout: 5s
     )EOF"));
 
-  // Set up a delinquent transport socket that causes the dispatcher to exit on every read & write
-  // instead of actually doing anything useful.
+  // Set up a delinquent transport socket that causes the dispatcher to exit on every read &
+  // write instead of actually doing anything useful.
   auto bad_transport_socket = std::make_unique<NiceMock<Network::MockTransportSocket>>();
   Network::TransportSocketCallbacks* transport_callbacks;
   EXPECT_CALL(*bad_transport_socket, setTransportSocketCallbacks)
@@ -403,8 +435,8 @@ TEST_P(OverloadScaledTimerIntegrationTest, TlsHandshakeTimeout) {
   ON_CALL(*bad_transport_socket, doRead).WillByDefault(InvokeWithoutArgs([&] {
     Buffer::OwnedImpl buffer;
     transport_callbacks->connection().dispatcher().exit();
-    // Read some amount of data; what's more important is whether the socket was remote-closed. That
-    // needs to be propagated to the socket.
+    // Read some amount of data; what's more important is whether the socket was remote-closed.
+    // That needs to be propagated to the socket.
     return Network::IoResult{transport_callbacks->ioHandle().read(buffer, 2 * 1024).rc_ == 0
                                  ? Network::PostIoAction::Close
                                  : Network::PostIoAction::KeepOpen,
@@ -441,8 +473,8 @@ TEST_P(OverloadScaledTimerIntegrationTest, TlsHandshakeTimeout) {
   EXPECT_FALSE(connect_callbacks.connected());
 
   // At this point, Envoy has been waiting for the (bad) client to finish the TLS handshake for 5
-  // seconds. Increase the load so that the minimum time has now elapsed. This should cause Envoy to
-  // close the connection on its end.
+  // seconds. Increase the load so that the minimum time has now elapsed. This should cause Envoy
+  // to close the connection on its end.
   updateResource(0.9);
   test_server_->waitForGaugeEq("overload.envoy.overload_actions.reduce_timeouts.scale_percent",
                                100);
@@ -456,6 +488,129 @@ TEST_P(OverloadScaledTimerIntegrationTest, TlsHandshakeTimeout) {
   // The transport-level connection was never completed, and the connection was closed.
   EXPECT_FALSE(connect_callbacks.connected());
   EXPECT_TRUE(connect_callbacks.closed());
+}
+
+class OverloadProactiveChecksIntegrationTest
+    : public testing::TestWithParam<Network::Address::IpVersion>,
+      public Event::TestUsingSimulatedTime,
+      public BaseIntegrationTest {
+public:
+  OverloadProactiveChecksIntegrationTest()
+      : BaseIntegrationTest(GetParam(), ConfigHelper::tcpProxyConfig()),
+        fake_proactive_resource_monitor_factory_(
+            "envoy.resource_monitors.global_downstream_max_connections"),
+        register_proactive_resource_monitor_factory_(fake_proactive_resource_monitor_factory_) {}
+
+  AssertionResult waitForConnections(uint32_t envoy_downstream_connections) {
+    // The multiplier of 2 is because both Envoy's downstream connections and
+    // the test server's downstream connections are counted by the global
+    // counter.
+    uint32_t expected_connections = envoy_downstream_connections * 2;
+
+    for (int i = 0; i < 10; ++i) {
+      if (Network::AcceptedSocketImpl::acceptedSocketCount() == expected_connections) {
+        return AssertionSuccess();
+      }
+      // TODO(mattklein123): Do not use a real sleep here. Switch to events with waitFor().
+      timeSystem().realSleepDoNotUseWithoutScrutiny(std::chrono::milliseconds(500));
+    }
+    if (Network::AcceptedSocketImpl::acceptedSocketCount() == expected_connections) {
+      return AssertionSuccess();
+    }
+    return AssertionFailure();
+  }
+
+protected:
+  void
+  initializeOverloadManager(const envoy::config::overload::v3::OverloadAction& overload_action) {
+    const std::string overload_config = R"EOF(
+        resource_monitors:
+          - name: "envoy.resource_monitors.global_downstream_max_connections"
+            typed_config:
+              "@type": type.googleapis.com/google.protobuf.Empty
+      )EOF";
+    envoy::config::overload::v3::OverloadManager overload_manager_config =
+        TestUtility::parseYaml<envoy::config::overload::v3::OverloadManager>(overload_config);
+    *overload_manager_config.add_actions() = overload_action;
+
+    config_helper_.addConfigModifier(
+        [overload_manager_config](envoy::config::bootstrap::v3::Bootstrap& bootstrap) {
+          *bootstrap.mutable_overload_manager() = overload_manager_config;
+        });
+
+    BaseIntegrationTest::initialize();
+  }
+
+  FakeProactiveResourceMonitorFactory<
+      envoy::extensions::resource_monitors::downstream_connections::v3::DownstreamConnectionsConfig>
+      fake_proactive_resource_monitor_factory_;
+  Registry::InjectFactory<Server::Configuration::ProactiveResourceMonitorFactory>
+      register_proactive_resource_monitor_factory_;
+};
+
+INSTANTIATE_TEST_SUITE_P(Protocols, OverloadProactiveChecksIntegrationTest,
+                         testing::ValuesIn(TestEnvironment::getIpVersionsForTest()),
+                         TestUtility::ipTestParamsToString);
+
+TEST_P(OverloadProactiveChecksIntegrationTest, DoesNotAcceptConnectionsWhenOverloaded) {
+  concurrency_ = 4;
+  initializeOverloadManager(
+      TestUtility::parseYaml<envoy::config::overload::v3::OverloadAction>(R"EOF(
+      name: "envoy.overload_actions.stop_accepting_requests"
+      triggers:
+        - name: "envoy.resource_monitors.global_downstream_max_connections"
+          threshold:
+            value: 1
+    )EOF"));
+
+  std::vector<IntegrationTcpClientPtr> tcp_clients;
+  std::vector<FakeRawConnectionPtr> raw_conns;
+
+  for (int i = 0; i < 8; i++) {
+    tcp_clients.emplace_back(makeTcpConnection(lookupPort("listener_0")));
+    raw_conns.emplace_back();
+    ASSERT_TRUE(
+        fake_upstreams_[0]->waitForRawConnection(raw_conns.back(), std::chrono::milliseconds(500)));
+    ASSERT_TRUE(tcp_clients.back()->connected());
+  }
+
+  // There are 8 active connections, so new connection should fail.
+  tcp_clients.emplace_back(makeTcpConnection(lookupPort("listener_0")));
+  raw_conns.emplace_back();
+  ASSERT_FALSE(
+      fake_upstreams_[0]->waitForRawConnection(raw_conns.back(), std::chrono::milliseconds(500)));
+  tcp_clients.back()->waitForDisconnect();
+
+  // Get rid of the client that failed to connect.
+  tcp_clients.back()->close();
+  tcp_clients.pop_back();
+
+  // Close the first connection that was successful so that we can open a new successful
+  // connection.
+  tcp_clients.front()->close();
+  ASSERT_TRUE(raw_conns.front()->waitForDisconnect());
+
+  // Make sure to not try to connect again until the acceptedSocketCount is updated.
+  ASSERT_TRUE(waitForConnections(7));
+  tcp_clients.emplace_back(makeTcpConnection(lookupPort("listener_0")));
+  raw_conns.emplace_back();
+  ASSERT_TRUE(fake_upstreams_[0]->waitForRawConnection(raw_conns.back()));
+  ASSERT_TRUE(tcp_clients.back()->connected());
+
+  const bool isV4 = (version_ == Network::Address::IpVersion::v4);
+  auto local_address = isV4 ? Network::Utility::getCanonicalIpv4LoopbackAddress()
+                            : Network::Utility::getIpv6LoopbackAddress();
+
+  const std::string counter_prefix = (isV4 ? "listener.127.0.0.1_0." : "listener.[__1]_0.");
+
+  test_server_->waitForCounterEq(counter_prefix + "downstream_global_cx_overflow", 1);
+
+  for (auto& tcp_client : tcp_clients) {
+    tcp_client->close();
+  }
+
+  tcp_clients.clear();
+  raw_conns.clear();
 }
 
 } // namespace Envoy
