@@ -82,6 +82,7 @@ FilterHeadersStatus Filter::onHeaders(ProcessorState& state,
   ENVOY_LOG(debug, "Sending headers message");
   stream_->send(std::move(req), false);
   stats_.stream_msgs_sent_.inc();
+  state.setPaused(true);
   return FilterHeadersStatus::StopIteration;
 }
 
@@ -135,11 +136,30 @@ FilterDataStatus Filter::onData(ProcessorState& state, Buffer::Instance& data, b
     // We don't know what to do with the body until the response comes back.
     // We must buffer it in case we need it when that happens.
     if (end_stream) {
+      state.setPaused(true);
       return FilterDataStatus::StopIterationAndBuffer;
     } else {
       // Raise a watermark to prevent a buffer overflow until the response comes back.
+      state.setPaused(true);
       state.requestWatermark();
       return FilterDataStatus::StopIterationAndWatermark;
+    }
+  }
+
+  if (state.callbackState() == ProcessorState::CallbackState::StreamedBodyCallbackFinishing) {
+    // We were previously streaming the body, but there are more chunks waiting
+    // to be processed, so we can't send the body yet.
+    // Move the data for our chunk into a queue so that we can re-inject it later
+    // when the processor returns. Raise the watermark in an idempotent way
+    // if the queue is too large.
+    ENVOY_LOG(trace, "Enqueuing data while we wait for processing to finish");
+    state.enqueueStreamingChunk(data, end_stream, false);
+    if (end_stream) {
+      // But we need to buffer the last chunk because it's our last chance to do stuff
+      state.setPaused(true);
+      return FilterDataStatus::StopIterationNoBuffer;
+    } else {
+      return FilterDataStatus::Continue;
     }
   }
 
@@ -160,22 +180,52 @@ FilterDataStatus Filter::onData(ProcessorState& state, Buffer::Instance& data, b
       // The body has been buffered and we need to send the buffer
       ENVOY_LOG(debug, "Sending request body message");
       state.addBufferedData(data);
-      sendBodyChunk(state, *state.bufferedData(), true);
+      sendBodyChunk(state, *state.bufferedData(),
+                    ProcessorState::CallbackState::BufferedBodyCallback, true);
       // Since we just just moved the data into the buffer, return NoBuffer
       // so that we do not buffer this chunk twice.
+      state.setPaused(true);
       result = FilterDataStatus::StopIterationNoBuffer;
       break;
     }
 
     ENVOY_LOG(trace, "onData: Buffering");
+    state.setPaused(true);
     result = FilterDataStatus::StopIterationAndBuffer;
     break;
 
+  case ProcessingMode::STREAMED: {
+    switch (openStream()) {
+    case StreamOpenState::Error:
+      return FilterDataStatus::StopIterationNoBuffer;
+    case StreamOpenState::IgnoreError:
+      return FilterDataStatus::Continue;
+    case StreamOpenState::Ok:
+      // Fall through
+      break;
+    }
+
+    // Send the chunk on the gRPC stream
+    sendBodyChunk(state, data, ProcessorState::CallbackState::StreamedBodyCallback, end_stream);
+    // Move the data to the queue and optionally raise the watermark.
+    state.enqueueStreamingChunk(data, end_stream, true);
+
+    // At this point we will continue, but with no data, because that will come later
+    if (end_stream) {
+      // But we need to buffer the last chunk because it's our last chance to do stuff
+      state.setPaused(true);
+      result = FilterDataStatus::StopIterationNoBuffer;
+    } else {
+      result = FilterDataStatus::Continue;
+    }
+    break;
+  }
+
   case ProcessingMode::BUFFERED_PARTIAL:
-  case ProcessingMode::STREAMED:
     ENVOY_LOG(debug, "Ignoring unimplemented request body processing mode");
     result = FilterDataStatus::Continue;
     break;
+
   case ProcessingMode::NONE:
   default:
     result = FilterDataStatus::Continue;
@@ -195,6 +245,7 @@ FilterDataStatus Filter::onData(ProcessorState& state, Buffer::Instance& data, b
     }
 
     sendTrailers(state, *new_trailers);
+    state.setPaused(true);
     return FilterDataStatus::StopIterationAndBuffer;
   }
   return result;
@@ -221,6 +272,7 @@ FilterTrailersStatus Filter::onTrailers(ProcessorState& state, Http::HeaderMap& 
   if (state.callbackState() == ProcessorState::CallbackState::HeadersCallback ||
       state.callbackState() == ProcessorState::CallbackState::BufferedBodyCallback) {
     ENVOY_LOG(trace, "Previous callback still executing -- holding header iteration");
+    state.setPaused(true);
     return FilterTrailersStatus::StopIteration;
   }
 
@@ -228,7 +280,8 @@ FilterTrailersStatus Filter::onTrailers(ProcessorState& state, Http::HeaderMap& 
     // We would like to process the body in a buffered way, but until now the complete
     // body has not arrived. With the arrival of trailers, we now know that the body
     // has arrived.
-    sendBufferedData(state, true);
+    sendBufferedData(state, ProcessorState::CallbackState::BufferedBodyCallback, true);
+    state.setPaused(true);
     return FilterTrailersStatus::StopIteration;
   }
 
@@ -248,6 +301,7 @@ FilterTrailersStatus Filter::onTrailers(ProcessorState& state, Http::HeaderMap& 
   }
 
   sendTrailers(state, trailers);
+  state.setPaused(true);
   return FilterTrailersStatus::StopIteration;
 }
 
@@ -288,9 +342,10 @@ FilterTrailersStatus Filter::encodeTrailers(ResponseTrailerMap& trailers) {
   return status;
 }
 
-void Filter::sendBodyChunk(ProcessorState& state, const Buffer::Instance& data, bool end_stream) {
+void Filter::sendBodyChunk(ProcessorState& state, const Buffer::Instance& data,
+                           ProcessorState::CallbackState new_state, bool end_stream) {
   ENVOY_LOG(debug, "Sending a body chunk of {} bytes", data.length());
-  state.setCallbackState(ProcessorState::CallbackState::BufferedBodyCallback);
+  state.setCallbackState(new_state);
   state.startMessageTimer(std::bind(&Filter::onMessageTimeout, this), config_->messageTimeout());
   ProcessingRequest req;
   auto* body_req = state.mutableBody(req);
@@ -313,6 +368,7 @@ void Filter::sendTrailers(ProcessorState& state, const Http::HeaderMap& trailers
 
 void Filter::onReceiveMessage(std::unique_ptr<ProcessingResponse>&& r) {
   if (processing_complete_) {
+    ENVOY_LOG(debug, "Ignoring stream message received after processing complete");
     // Ignore additional messages after we decided we were done with the stream
     return;
   }
@@ -331,24 +387,31 @@ void Filter::onReceiveMessage(std::unique_ptr<ProcessingResponse>&& r) {
 
   switch (response->response_case()) {
   case ProcessingResponse::ResponseCase::kRequestHeaders:
+    ENVOY_LOG(debug, "Received RequestHeaders response");
     message_handled = decoding_state_.handleHeadersResponse(response->request_headers());
     break;
   case ProcessingResponse::ResponseCase::kResponseHeaders:
+    ENVOY_LOG(debug, "Received ResponseHeaders response");
     message_handled = encoding_state_.handleHeadersResponse(response->response_headers());
     break;
   case ProcessingResponse::ResponseCase::kRequestBody:
+    ENVOY_LOG(debug, "Received RequestBody response");
     message_handled = decoding_state_.handleBodyResponse(response->request_body());
     break;
   case ProcessingResponse::ResponseCase::kResponseBody:
+    ENVOY_LOG(debug, "Received ResponseBody response");
     message_handled = encoding_state_.handleBodyResponse(response->response_body());
     break;
   case ProcessingResponse::ResponseCase::kRequestTrailers:
+    ENVOY_LOG(debug, "Received RequestTrailers response");
     message_handled = decoding_state_.handleTrailersResponse(response->request_trailers());
     break;
   case ProcessingResponse::ResponseCase::kResponseTrailers:
+    ENVOY_LOG(debug, "Received responseTrailers response");
     message_handled = encoding_state_.handleTrailersResponse(response->response_trailers());
     break;
   case ProcessingResponse::ResponseCase::kImmediateResponse:
+    ENVOY_LOG(debug, "Received ImmediateResponse response");
     // We won't be sending anything more to the stream after we
     // receive this message.
     processing_complete_ = true;
@@ -357,6 +420,8 @@ void Filter::onReceiveMessage(std::unique_ptr<ProcessingResponse>&& r) {
     break;
   default:
     // Any other message is considered spurious
+    ENVOY_LOG(debug, "Received unknown stream message {} -- ignoring and marking spurious",
+              response->response_case());
     break;
   }
 
