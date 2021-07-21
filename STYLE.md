@@ -246,8 +246,50 @@ such as the current time. Instead, mocks such as
 [`MockRandomGenerator`](test/mocks/runtime/mocks.h) and
 [`Mock*TimeSource`](test/mocks/common.h) should be used.
 
+# Python coding style
+
+## pep8
+
+All python code should meet the pep8/pycodestyle standard.
+
+The exception to this is for positioning of boolean operators in multiline conjunctions (W503/W504)
+
+For example the following code is valid:
+
+```python
+
+some_aggregate_condition = (
+    a_condition
+    and (a_sub_condition
+         or another_sub_condition))
+
+```
+
+In this example the line split occurs before the `and` and `or` which are placed at the
+*beginning* of the following line.
+
+## pyflakes
+
+All python code is statically checked for correctness using pyflakes.
+
+## mypy (python typing)
+
+To be added.
+
+## linting
+
+All python code is linted using flake8
+
+## automated fix suggestions
+
+...to be figured out...
+
+## additional style guidelines
+
+For additional guidance on Python style please refer to the
+[Google Python style guide](https://google.github.io/styleguide/pyguide.html)
+
 # Google style guides for other languages
 
-* [Python](https://google.github.io/styleguide/pyguide.html)
 * [Bash](https://google.github.io/styleguide/shell.xml)
 * [Bazel](https://bazel.build/versions/master/docs/skylark/build-style.html)
