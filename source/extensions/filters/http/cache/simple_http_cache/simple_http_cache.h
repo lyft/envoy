@@ -22,6 +22,7 @@ private:
     Http::ResponseHeaderMapPtr response_headers_;
     ResponseMetadata metadata_;
     std::string body_;
+    Http::ResponseTrailerMapPtr trailers_;
   };
 
   // Looks for a response that has been varied. Only called from lookup.
@@ -39,11 +40,13 @@ public:
 
   Entry lookup(const LookupRequest& request);
   void insert(const Key& key, Http::ResponseHeaderMapPtr&& response_headers,
-              ResponseMetadata&& metadata, std::string&& body);
+              ResponseMetadata&& metadata, std::string&& body,
+              Http::ResponseTrailerMapPtr&& trailers);
 
   // Inserts a response that has been varied on certain headers.
   void varyInsert(const Key& request_key, Http::ResponseHeaderMapPtr&& response_headers,
                   ResponseMetadata&& metadata, std::string&& body,
+                  Http::ResponseTrailerMapPtr&& trailers,
                   const Http::RequestHeaderMap& request_vary_headers);
 
   absl::Mutex mutex_;
