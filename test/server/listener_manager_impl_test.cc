@@ -3954,8 +3954,8 @@ TEST_F(ListenerManagerImplWithRealFiltersTest, OriginalDstFilter) {
 
 class OriginalDstTestFilter : public Extensions::ListenerFilters::OriginalDst::OriginalDstFilter {
 public:
-  OriginalDstTestFilter(const envoy::config::core::v3::TrafficDirection& traffic_direction)
-      : Extensions::ListenerFilters::OriginalDst::OriginalDstFilter(traffic_direction) {}
+  OriginalDstTestFilter(const Extensions::ListenerFilters::OriginalDst::Config& config)
+      : Extensions::ListenerFilters::OriginalDst::OriginalDstFilter(config) {}
 
 private:
   Network::Address::InstanceConstSharedPtr getOriginalDst(Network::Socket&) override {
@@ -3971,17 +3971,15 @@ public:
   createListenerFilterFactoryFromProto(const Protobuf::Message&,
                                        const Network::ListenerFilterMatcherSharedPtr&,
                                        Configuration::ListenerFactoryContext& context) override {
-    return [traffic_direction = context.listenerConfig().direction()](
-               Network::ListenerFilterManager& filter_manager) -> void {
-      filter_manager.addAcceptFilter(nullptr,
-                                     std::make_unique<OriginalDstTestFilter>(traffic_direction));
+    Extensions::ListenerFilters::OriginalDst::Config config;
+    config.traffic_direction_ = context.listenerConfig().direction();
+    return [config](Network::ListenerFilterManager& filter_manager) -> void {
+      filter_manager.addAcceptFilter(nullptr, std::make_unique<OriginalDstTestFilter>(config));
     };
   }
 
   ProtobufTypes::MessagePtr createEmptyConfigProto() override {
-    // Using Struct instead of a custom per-filter empty config proto
-    // This is only allowed in tests.
-    return std::make_unique<Envoy::ProtobufWkt::Struct>();
+    return std::make_unique<envoy::extensions::filters::listener::original_dst::v3::OriginalDst>();
   }
 
   std::string name() const override { return "test.listener.original_dst"; }
@@ -4142,8 +4140,8 @@ TEST_F(ListenerManagerImplWithRealFiltersTest, OriginalDstTestFilterInbound) {
 class OriginalDstTestFilterIPv6
     : public Extensions::ListenerFilters::OriginalDst::OriginalDstFilter {
 public:
-  OriginalDstTestFilterIPv6(const envoy::config::core::v3::TrafficDirection& traffic_direction)
-      : Extensions::ListenerFilters::OriginalDst::OriginalDstFilter(traffic_direction) {}
+  OriginalDstTestFilterIPv6(const Extensions::ListenerFilters::OriginalDst::Config& config)
+      : Extensions::ListenerFilters::OriginalDst::OriginalDstFilter(config) {}
 
 private:
   Network::Address::InstanceConstSharedPtr getOriginalDst(Network::Socket&) override {
@@ -4160,17 +4158,17 @@ TEST_F(ListenerManagerImplWithRealFiltersTest, OriginalDstTestFilterIPv6) {
     createListenerFilterFactoryFromProto(const Protobuf::Message&,
                                          const Network::ListenerFilterMatcherSharedPtr&,
                                          Configuration::ListenerFactoryContext& context) override {
-      return [traffic_direction = context.listenerConfig().direction()](
-                 Network::ListenerFilterManager& filter_manager) -> void {
-        filter_manager.addAcceptFilter(
-            nullptr, std::make_unique<OriginalDstTestFilterIPv6>(traffic_direction));
+      Extensions::ListenerFilters::OriginalDst::Config config;
+      config.traffic_direction_ = context.listenerConfig().direction();
+      return [config](Network::ListenerFilterManager& filter_manager) -> void {
+        filter_manager.addAcceptFilter(nullptr,
+                                       std::make_unique<OriginalDstTestFilterIPv6>(config));
       };
     }
 
     ProtobufTypes::MessagePtr createEmptyConfigProto() override {
-      // Using Struct instead of a custom per-filter empty config proto
-      // This is only allowed in tests.
-      return std::make_unique<Envoy::ProtobufWkt::Struct>();
+      return std::make_unique<
+          envoy::extensions::filters::listener::original_dst::v3::OriginalDst>();
     }
 
     std::string name() const override { return "test.listener.original_dstipv6"; }

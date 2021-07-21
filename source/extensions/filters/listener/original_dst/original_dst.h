@@ -3,6 +3,7 @@
 #include "envoy/network/filter.h"
 
 #include "source/common/common/logger.h"
+#include "source/extensions/filters/listener/original_dst/config.h"
 
 namespace Envoy {
 namespace Extensions {
@@ -14,12 +15,7 @@ namespace OriginalDst {
  */
 class OriginalDstFilter : public Network::ListenerFilter, Logger::Loggable<Logger::Id::filter> {
 public:
-  OriginalDstFilter(const envoy::config::core::v3::TrafficDirection& traffic_direction)
-      : traffic_direction_(traffic_direction) {
-    // [[maybe_unused]] attribute is not supported on GCC for class members. We trivially use the
-    // parameter here to silence the warning.
-    (void)traffic_direction_;
-  }
+  explicit OriginalDstFilter(const Config& config) : config_(config) {}
 
   virtual Network::Address::InstanceConstSharedPtr getOriginalDst(Network::Socket& sock);
 
@@ -27,7 +23,7 @@ public:
   Network::FilterStatus onAccept(Network::ListenerFilterCallbacks& cb) override;
 
 private:
-  envoy::config::core::v3::TrafficDirection traffic_direction_;
+  Config config_;
 };
 
 } // namespace OriginalDst

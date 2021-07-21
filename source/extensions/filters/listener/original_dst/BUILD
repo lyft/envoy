@@ -13,10 +13,20 @@ licenses(["notice"])  # Apache 2
 envoy_extension_package()
 
 envoy_cc_library(
+    name = "config_lib",
+    hdrs = ["config.h"],
+    deps = [
+        "//envoy/network:filter_interface",
+        "@envoy_api//envoy/extensions/filters/listener/original_dst/v3:pkg_cc_proto",
+    ],
+)
+
+envoy_cc_library(
     name = "original_dst_lib",
     srcs = ["original_dst.cc"],
     hdrs = ["original_dst.h"],
     deps = [
+        ":config_lib",
         "//envoy/network:filter_interface",
         "//envoy/network:listen_socket_interface",
         "//source/common/common:assert_lib",
@@ -28,15 +38,20 @@ envoy_cc_library(
 
 envoy_cc_extension(
     name = "config",
-    srcs = ["config.cc"],
+    srcs = [
+        "config_factory.cc",
+    ],
+    hdrs = [
+        "config_factory.h",
+    ],
     # TODO(#9953) clean up.
     extra_visibility = [
         "//test/integration:__subpackages__",
     ],
     deps = [
+        ":config_lib",
         ":original_dst_lib",
         "//envoy/registry",
         "//envoy/server:filter_config_interface",
-        "@envoy_api//envoy/extensions/filters/listener/original_dst/v3:pkg_cc_proto",
     ],
 )

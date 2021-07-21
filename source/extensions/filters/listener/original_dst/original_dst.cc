@@ -12,8 +12,19 @@ namespace Extensions {
 namespace ListenerFilters {
 namespace OriginalDst {
 
-Network::Address::InstanceConstSharedPtr OriginalDstFilter::getOriginalDst(Network::Socket& sock) {
-  return Network::Utility::getOriginalDst(sock);
+Network::Address::InstanceConstSharedPtr
+OriginalDstFilter::getOriginalDst(Network::Socket& socket) {
+  switch (config_.method_) {
+  case Config::OriginalDstMethod::SocketOption:
+    return Network::Utility::getOriginalDst(socket);
+  case Config::OriginalDstMethod::NoOp: {
+    ASSERT(socket.addressProvider().localAddress() != nullptr &&
+           socket.addressProvider().localAddress()->type() == Network::Address::Type::Ip);
+    return socket.addressProvider().localAddress();
+  }
+  default:
+    NOT_REACHED_GCOVR_EXCL_LINE;
+  }
 }
 
 Network::FilterStatus OriginalDstFilter::onAccept(Network::ListenerFilterCallbacks& cb) {
@@ -31,7 +42,7 @@ Network::FilterStatus OriginalDstFilter::onAccept(Network::ListenerFilterCallbac
       // See how to perform bind or connect redirection here:
       // https://docs.microsoft.com/en-us/windows-hardware/drivers/network/using-bind-or-connect-redirection
       if constexpr (Platform::win32SupportsOriginalDestination()) {
-        if (traffic_direction_ == envoy::config::core::v3::OUTBOUND) {
+        if (config_.traffic_direction_ == envoy::config::core::v3::OUTBOUND) {
           ENVOY_LOG(debug, "[Windows] Querying for redirect record for outbound listener");
           unsigned long redirectRecordsSize = 0;
           auto redirect_records = std::make_shared<Network::Win32RedirectRecords>();
